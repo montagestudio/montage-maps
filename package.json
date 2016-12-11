@@ -1,0 +1,11 @@
+{
+    "name": "montage-maps",
+    "version": "1.0.0",
+    "author": "Montage Studio, inc. (http://montagestudio.com/)",
+    "repository": {
+        "type": "git",
+        "url": "montagestudio/montage-maps"
+    },
+    "dependencies": {},
+    "private": true
+}
