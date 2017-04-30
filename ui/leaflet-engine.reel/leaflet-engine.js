@@ -1,6 +1,8 @@
 var Component = require("montage/ui/component").Component,
     BoundingBox = require("montage-geo/logic/model/bounding-box").BoundingBox,
-    L = require("leaflet");
+    L = require("leaflet"),
+    Point = require("montage-geo/logic/model/point").Point,
+    Position = require("montage-geo/logic/model/position").Position;
 
 /**
  * @class LeafletEngine
@@ -29,6 +31,58 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         }
     },
 
+    center: {
+        get: function () {
+            if (!this._center) {
+                this._center = Point.withCoordinates([0, 0]);
+                this._center.addPathChangeListener("coordinates.longitude", this._validateCenter.bind(this));
+                this._center.addPathChangeListener("coordinates.latitude", this._validateCenter.bind(this));
+            }
+            return this._center;
+        },
+        set: function (value) {
+            var thisPosition, newPosition;
+            if (value instanceof Point) {
+                newPosition = value.coordinates;
+            } else if (value instanceof Object) {
+                newPosition = value;
+            }
+            if (newPosition) {
+                thisPosition = this._center.coordinates;
+                thisPosition.latitude = newPosition.latitude;
+                thisPosition.longitude = newPosition.longitude;
+                this._map.setView({
+                    lon: thisPosition.longitude,
+                    lat: thisPosition.latitude
+                });
+            }
+        }
+    },
+
+    _validateCenter: {
+        value: function () {
+            var north = this.bounds.yMax,
+                south = this.bounds.yMin,
+                isTooFarNorth = north > 85.05112878,
+                isTooFarSouth = south < -85.05112878,
+                center = this._center.coordinates,
+                delta;
+            if (isTooFarNorth) {
+                delta = 85.05112878 - (north - center.latitude) * 1.1;
+                this.center = {
+                    longitude: center.longitude,
+                    latitude: delta
+                };
+            } else if (isTooFarSouth) {
+                delta = -(85.05112878 - (Math.abs(south) - Math.abs(center.latitude)) * 1.1);
+                this.center = {
+                    longitude: center.longitude,
+                    latitude: delta
+                };
+            }
+        }
+    },
+
     enterDocument: {
         value: function (firstTime) {
             if (firstTime) {
@@ -54,7 +108,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         value: function () {
             var width = this.element.offsetWidth,
                 height = this.element.offsetHeight,
-                minZoom = this._calculateMinScale(width, height);
+                minZoom = this._minZoomForDimensions(width, height);
             this._map = L.map(this.element, {
                 center: [0, 0],
                 doubleClickZoom: true,
@@ -86,36 +140,18 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
     _handleMoveEnd: {
         value: function () {
-            // var mapBounds = this._map.getBounds(),
-            //     west = mapBounds.getWest(),
-            //     south = mapBounds.getSouth(),
-            //     east = mapBounds.getEast(),
-            //     north = mapBounds.getNorth(),
-                // cursor = west,
-                // world = this._worldCount(cursor),
-                // maxEast = world * 360 + 180,
-                // bounds = [];
-
-            // while (cursor < east) {
-            //     if (maxEast < east) {
-            //         bounds.push(BoundingBox.withCoordinates(cursor, south, maxEast, north));
-            //         cursor = maxEast;
-            //         maxEast += 360;
-            //     } else {
-            //         bounds.push(BoundingBox.withCoordinates(cursor, south, east, north));
-            //         cursor = east;
-            //     }
-            // }
-
-            // this.bounds.splice.apply(this.bounds, [0, Infinity].concat(bounds));
-            // this.bounds.forEach(this._logBoundingBox.bind(this));
-
-            var mapBounds = this._map.getBounds();
-            this.bounds.xMin = mapBounds.getWest();
-            this.bounds.yMin = mapBounds.getSouth();
-            this.bounds.xMax = mapBounds.getEast();
-            this.bounds.yMax = mapBounds.getNorth();
-            this._logBoundingBox(this.bounds);
+            var mapBounds = this._map.getBounds(),
+                mapCenter = this._map.getCenter(),
+                bounds = this.bounds,
+                position = this.center.coordinates;
+            bounds.xMin = mapBounds.getWest();
+            bounds.yMin = mapBounds.getSouth();
+            bounds.xMax = mapBounds.getEast();
+            bounds.yMax = mapBounds.getNorth();
+            position.longitude = mapCenter.lng;
+            position.latitude = mapCenter.lat;
+            // this._logBoundingBox(this.bounds);
+            // this._logPoint(this.center);
         }
     },
 
@@ -123,7 +159,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         value: function () {
             var map = this._map,
                 size = map.getSize(),
-                minZoom = this._calculateMinScale(size.x, size.y);
+                minZoom = this._minZoomForDimensions(size.x, size.y);
             if (map.options.minZoom !== minZoom) {
                 map.options.minZoom = minZoom;
                 if(map.getZoom() < minZoom) {
@@ -133,19 +169,19 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         }
     },
 
-    _calculateMinScale: {
+    _minZoomForDimensions: {
         value: function (width, height) {
             var minZoom = 0,
-                dimensions = this._calculateSize(minZoom);
+                dimensions = this._mapSizeForZoom(minZoom);
             while (dimensions < width || dimensions < height) {
                 minZoom += 1;
-                dimensions = this._calculateSize(minZoom);
+                dimensions = this._mapSizeForZoom(minZoom);
             }
             return minZoom;
         }
     },
 
-    _calculateSize: {
+    _mapSizeForZoom: {
         value: function (zoom) {
             return Math.pow(2, zoom) * 256;
         }
@@ -162,6 +198,16 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         }
     },
 
+    _logPoint: {
+        value: function (point) {
+            var position = point.coordinates,
+                rawLongitude = position.longitude,
+                normalizedLongitude = this._normalizeLongitude(rawLongitude);
+            console.log("Raw Point Longitude (", rawLongitude, ")");
+            console.log("Normalized Point Longitude (", normalizedLongitude, ")");
+        }
+    },
+
     _normalizeLongitude: {
         value: function (longitude) {
             while (longitude > 180) {
@@ -172,21 +218,8 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             }
             return longitude;
         }
-    },
-
-    _worldCount: {
-        value: function (longitude) {
-            var count = 0;
-            while (longitude > 180) {
-                count += 1;
-                longitude -= 360;
-            }
-            while (longitude < -180) {
-                count -= 1;
-                longitude += 360;
-            }
-            return count;
-        }
     }
+
+}, {
 
 });
