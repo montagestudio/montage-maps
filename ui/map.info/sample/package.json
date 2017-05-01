@@ -5,6 +5,7 @@
         "postinstall": "npm link ../../.."
     },
     "dependencies": {
+        "montage-geo": "montagestudio/montage-geo",
         "montage-maps": "../../..",
         "montage": "montagejs/montage#master"
     },

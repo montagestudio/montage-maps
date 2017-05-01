@@ -3,6 +3,9 @@ var Component = require("montage/ui/component").Component,
     CartesianPoint = require("logic/model/point").Point,
     L = require("leaflet"),
     Point = require("montage-geo/logic/model/point").Point;
+
+var DEFAULT_ZOOM = 4;
+
 /**
  * @class LeafletEngine
  * @extends Component
@@ -50,33 +53,15 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
      */
     center: {
         get: function () {
-            if (!this._center) {
-                this._initializeCenter();
-            }
             return this._center;
         },
         set: function (value) {
-            var thisPosition, newPosition;
-            if (this._map && value instanceof Point) {
-                thisPosition = this.center.coordinates;
-                newPosition = value.coordinates;
-                thisPosition.latitude = newPosition.latitude;
-                thisPosition.longitude = newPosition.longitude;
-                this._setCenter(thisPosition.longitude, thisPosition.latitude);
-            }
-        }
-    },
-
-    _initializeCenter: {
-        value: function () {
-            var mapCenter = this._map && this._map.getCenter(),
-                coordinates = mapCenter && [mapCenter.lng, mapCenter.lat] || [0, 0];
-            this._center = Point.withCoordinates(coordinates);
-            if (this.maxBounds && this.maxBounds.xMin > -Infinity || this.maxBounds.xMax < Infinity) {
-                this._center.addPathChangeListener("coordinates.longitude", this._validateLongitude.bind(this));
-            }
-            if (this.maxBounds && this.maxBounds.yMin > -Infinity || this.maxBounds.yMax < Infinity) {
-                this._center.addPathChangeListener("coordinates.latitude", this._validateLatitude.bind(this));
+            var position;
+            if (value instanceof Point) {
+                this._center = value;
+                this._initializeCenter(this._center);
+                position = value.coordinates;
+                this._setCenter(position.longitude, position.latitude);
             }
         }
     },
@@ -107,13 +92,9 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         set: function (value) {
             if (value !== this._zoom) {
                 this._zoom = value;
-                this._map.setZoom(value);
+                this._setZoom(value);
             }
         }
-    },
-
-    _zoom: {
-        value: 0
     },
 
     _validateLatitude: {
@@ -170,6 +151,12 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         }
     },
 
+    _setZoom: {
+        value: function (zoom) {
+            this._map && this._map.setZoom(zoom);
+        }
+    },
+
     /*****************************************************
      * Internal Variables
      */
@@ -200,6 +187,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
      */
     _initialize: {
         value: function () {
+            this._initializeCenter();
             this._initializeMap();
             this._initializeBaseMap();
             this._initializeEvents();
@@ -207,17 +195,50 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         }
     },
 
+    _initializeCenter: {
+        value: function (center) {
+            var mapCenter, coordinates;
+            center = center || this._center;
+            if (!center) {
+                mapCenter = this._map && this._map.getCenter();
+                coordinates = mapCenter && [mapCenter.lng, mapCenter.lat] || [0, 0];
+                this.dispatchBeforeOwnPropertyChange("center", this.center);
+                this._center = center = Point.withCoordinates(coordinates);
+                this.dispatchOwnPropertyChange("center", this.center);
+            }
+            if (this._longitudeChangeListenerCanceler) {
+                this._longitudeChangeListenerCanceler();
+            }
+            if (this._latitudeChangeListenerCanceler) {
+                this._latitudeChangeListenerCanceler();
+            }
+            if (this.maxBounds && this.maxBounds.xMin > -Infinity || this.maxBounds.xMax < Infinity) {
+                this._longitudeChangeListenerCanceler = center.addPathChangeListener(
+                    "coordinates.longitude", this._validateLongitude.bind(this)
+                );
+            }
+            if (this.maxBounds && this.maxBounds.yMin > -Infinity || this.maxBounds.yMax < Infinity) {
+                this._latitudeChangeListenerCanceler = center.addPathChangeListener(
+                    "coordinates.latitude", this._validateLatitude.bind(this)
+                );
+            }
+        }
+    },
+
     _initializeMap: {
         value: function () {
             var width = this.element.offsetWidth,
                 height = this.element.offsetHeight,
+                position = this.center.coordinates,
+                zoom = isNaN(this.zoom) ? DEFAULT_ZOOM : this.zoom,
                 minZoom = this._minZoomForDimensions(width, height);
+
             this._map = L.map(this.element, {
-                center: [0, 0],
+                center: [position.latitude, position.longitude],
                 doubleClickZoom: true,
                 dragging: true,
                 minZoom: minZoom,
-                zoom: minZoom > 4 ? minZoom : 4,
+                zoom: minZoom > zoom ? minZoom : zoom,
                 zoomControl: false
             });
         }
@@ -342,12 +363,36 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     _minZoomForDimensions: {
         value: function (width, height) {
             var minZoom = 0,
-                dimensions = this._mapSizeForZoom(minZoom);
-            while (dimensions < width || dimensions < height) {
+                totalSize = this._mapSizeForZoom(minZoom),
+                widthPercentage = this._maxBoundsWidthPercentage(),
+                mapWidth = totalSize * widthPercentage,
+                heightPercentage = this._maxBoundsWidthPercentage(),
+                mapHeight = totalSize * heightPercentage;
+            while (mapWidth < width || mapHeight < height) {
                 minZoom += 1;
-                dimensions = this._mapSizeForZoom(minZoom);
+                totalSize = this._mapSizeForZoom(minZoom);
+                mapWidth = totalSize * widthPercentage;
+                mapHeight = totalSize * heightPercentage;
             }
             return minZoom;
+        }
+    },
+
+    _maxBoundsWidthPercentage: {
+        value: function () {
+            var bounds = this.maxBounds,
+                xMax = bounds && bounds.xMax || 180,
+                xMin = bounds && bounds.xMin || -180;
+            return (xMax - xMin) / 360;
+        }
+    },
+
+    _maxBoundsHeightPercentage: {
+        value: function () {
+            var bounds = this.maxBounds,
+                yMax = bounds && bounds.yMax || 85.05112878,
+                yMin = bounds && bounds.yMin || -85.05112878;
+            return (yMax - yMin) / 170.10225756;
         }
     },
 

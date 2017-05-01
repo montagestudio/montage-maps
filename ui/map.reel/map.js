@@ -1,6 +1,7 @@
 var Component = require("montage/ui/component").Component,
     BoundingBox = require("montage-geo/logic/model/bounding-box").BoundingBox,
-    LeafletEngine = require("ui/leaflet-engine.reel").LeafletEngine;
+    LeafletEngine = require("ui/leaflet-engine.reel").LeafletEngine,
+    Point = require("montage-geo/logic/model/point").Point;
 
 /**
  * @class Map
@@ -17,11 +18,38 @@ exports.Map = Component.specialize(/** @lends Map# */ {
     },
 
     center: {
-        value: undefined
+        get: function () {
+            return this._center;
+        },
+        set: function (value) {
+            if (Array.isArray(value)) {
+                value = Point.withCoordinates(value);
+            }
+            if (value) this._center = value;
+        }
+    },
+
+    maxBounds: {
+        get: function () {
+            return this._maxBounds;
+        },
+        set: function (value) {
+            if (Array.isArray(value)) {
+                value = BoundingBox.withCoordinates.apply(BoundingBox, value);
+            }
+            this._maxBounds = value;
+        }
     },
 
     zoom: {
-        value: undefined
+        get: function () {
+            return this._zoom;
+        },
+        set: function (value) {
+            if (!isNaN(value)) {
+                this._zoom = value;
+            }
+        }
     },
 
     /*****************************************************
@@ -32,7 +60,8 @@ exports.Map = Component.specialize(/** @lends Map# */ {
         get: function () {
             if (!this.__engine) {
                 this.__engine = new LeafletEngine();
-                this.__engine.maxBounds = BoundingBox.withCoordinates(
+                // this.__engine.maxBounds = BoundingBox.withCoordinates(-20, -20, 20, 20);
+                this.__engine.maxBounds = this.maxBounds || BoundingBox.withCoordinates(
                     -Infinity, -85.05112878, Infinity, 85.05112878
                 );
                 this.defineBindings({
@@ -58,10 +87,16 @@ exports.Map = Component.specialize(/** @lends Map# */ {
         }
     },
 
+    // In the future, this will be used to specify the current engine.
     _engineKey: {
         value: undefined
     },
 
+    /**
+     * Sets this map to the specified bounds.
+     * @method
+     * @param {BoundingBox || array<number>} bounds - The bounds to move this map to.
+     */
     setBounds: {
         value: function () {
             var bbox;
