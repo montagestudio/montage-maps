@@ -383,6 +383,8 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             var bounds = this.maxBounds,
                 xMax = bounds && bounds.xMax || 180,
                 xMin = bounds && bounds.xMin || -180;
+            if (xMax > 180) xMax = 180;
+            if (xMin < -180) xMin = -180;
             return (xMax - xMin) / 360;
         }
     },
