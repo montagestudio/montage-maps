@@ -11,6 +11,11 @@
         "owner": {
             "properties": {
                 "element": {"#": "main"}
+            },
+            "bindings": {
+                "bounds": {"<-": "@map.bounds"},
+                "center": {"<-": "@map.center"},
+                "zoom": {"<-": "@map.zoom"}
             }
         },
         "map": {

@@ -13,19 +13,33 @@ exports.Map = Component.specialize(/** @lends Map# */ {
      * Properties
      */
 
+    /**
+     * The current bounds of the map.  To set this value use
+     * Map#setBounds
+     *
+     * @type {BoundingBox}
+     */
     bounds: {
         value: undefined
     },
 
+    /**
+     * The current center of the map.  Setting this value will
+     * update the map's position.
+     *
+     * @type {Point}
+     */
     center: {
         get: function () {
             return this._center;
         },
         set: function (value) {
-            if (Array.isArray(value)) {
+            if (Array.isArray(value) && value.length > 1) {
                 value = Point.withCoordinates(value);
             }
-            if (value) this._center = value;
+            if (value && value instanceof Point) {
+                this._center = value;
+            }
         }
     },
 
@@ -34,10 +48,12 @@ exports.Map = Component.specialize(/** @lends Map# */ {
             return this._maxBounds;
         },
         set: function (value) {
-            if (Array.isArray(value)) {
-                value = BoundingBox.withCoordinates.apply(BoundingBox, value);
+            if (Array.isArray(value) && value.length === 4) {
+                value = BoundingBox.withCoordinates(value[0], value[1], value[2], value[3]);
             }
-            this._maxBounds = value;
+            if (value instanceof BoundingBox) {
+                this._maxBounds = value;
+            }
         }
     },
 
@@ -60,12 +76,11 @@ exports.Map = Component.specialize(/** @lends Map# */ {
         get: function () {
             if (!this.__engine) {
                 this.__engine = new LeafletEngine();
-                // this.__engine.maxBounds = BoundingBox.withCoordinates(-20, -20, 20, 20);
                 this.__engine.maxBounds = this.maxBounds || BoundingBox.withCoordinates(
                     -Infinity, -85.05112878, Infinity, 85.05112878
                 );
                 this.defineBindings({
-                    "bounds": {"<->": "bounds", source: this.__engine},
+                    "bounds": {"<-": "bounds", source: this.__engine},
                     "zoom": {"<->": "zoom", source: this.__engine},
                     "center": {"<->": "center", source: this.__engine}
                 });
@@ -79,7 +94,7 @@ exports.Map = Component.specialize(/** @lends Map# */ {
                 this.cancelBinding("zoom");
                 this.__engine = value;
                 this.defineBindings({
-                    "bounds": {"<->": "bounds", source: this.__engine},
+                    "bounds": {"<-": "bounds", source: this.__engine},
                     "zoom": {"<->": "zoom", source: this.__engine},
                     "center": {"<->": "center", source: this.__engine}
                 });
@@ -99,28 +114,36 @@ exports.Map = Component.specialize(/** @lends Map# */ {
      */
     setBounds: {
         value: function () {
-            var bbox;
-            if (arguments.length === 1) {
-                bbox = arguments[0].bbox;
-            } else {
-                bbox = arguments;
+            var newBounds;
+            if (arguments.length === 1 && arguments[0] instanceof BoundingBox) {
+                newBounds = arguments[0]
+            } else if (arguments.length === 4) {
+                newBounds = BoundingBox.withCoordinates(arguments[0], arguments[1], arguments[2], arguments[3]);
             }
-            this.dispatchBeforeOwnPropertyChange("bounds", this.bounds);
-            this.bounds.xMin = bbox[0];
-            this.bounds.yMin = bbox[1];
-            this.bounds.xMax = bbox[2];
-            this.bounds.yMax = bbox[3];
-            this.dispatchOwnPropertyChange("bounds", this.bounds);
+            if (newBounds) {
+                this.bounds = newBounds;
+            }
         }
     },
 
+    /**
+     * Center the map on the specified position.  The position can either be a
+     * Point object or a pair of coordinates.
+     * @method
+     * @param {Point || number} bounds|longitude
+     * @param {?number} latitude
+     */
     setCenter: {
-        value: function (longitude, latitude) {
-            var position = this.center.coordinates;
-            this.dispatchBeforeOwnPropertyChange("center", this.center);
-            position.longitude = longitude;
-            position.latitude = latitude;
-            this.dispatchOwnPropertyChange("center", this.center);
+        value: function () {
+            var newCenter;
+            if (arguments.length === 1 && arguments[0] instanceof Point) {
+                newCenter = arguments[0];
+            } else if (arguments.length === 2) {
+                newCenter = Point.withCoordinates([arguments[0], arguments[1]]);
+            }
+            if (newCenter) {
+                this.center = newCenter;
+            }
         }
     },
 
