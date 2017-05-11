@@ -3,6 +3,7 @@ var Component = require("montage/ui/component").Component,
     CartesianPoint = require("logic/model/point").Point,
     L = require("leaflet"),
     Point = require("montage-geo/logic/model/point").Point,
+    Set = require("collections/set"),
     DEFAULT_ZOOM = 4;
 
 /**
@@ -190,6 +191,94 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     },
 
     /*****************************************************
+     * Draw Cycle
+     */
+
+    draw: {
+        value: function () {
+            var self = this;
+            this._worlds.forEach(function (identifier) {
+                if (!self._symbols.get(identifier)) {
+                    self._drawFeatures(identifier);
+                }
+            });
+            this._symbols.forEach(function (value, key) {
+                if (!self._worlds.has(key)) {
+                    self._removeSymbols(value);
+                    self._symbols.delete(key);
+                }
+            })
+        }
+    },
+
+    _initializeWorldSymbols: {
+        value: function (identifier) {
+            var offset = identifier * 360,
+                featureSymbolsMap = new Map(),
+                symbol,
+                self = this;
+            this._features.forEach(function (feature) {
+                symbol = self._drawFeature(feature, offset);
+                featureSymbolsMap.set(feature, symbol);
+            });
+            this._symbols.set(identifier, symbols);
+        }
+    },
+
+    _drawFeatures: {
+        value: function (features) {
+            var self = this,
+                feature, i, n;
+            for (i = 0, n = features.length; i < n; i += 1) {
+                feature = features[i];
+                this._symbols.forEach(function (featureSymbolMap, identifier) {
+                    var symbol = self._drawFeature(feature, identifier *= 360);
+                    featureSymbolMap.set(feature, symbol);
+                });
+            }
+        }
+    },
+
+    _removeSymbols: {
+        value: function (symbols) {
+            var i, n;
+            for (i = 0, n = symbols.length; i < n; i += 1) {
+                this._map.removeLayer(symbols[i]);
+            }
+        }
+    },
+
+    _drawFeature: {
+        value: function (feature, offset) {
+            var coordinate = feature.geometry.coordinates,
+                longitude = offset === 0 ? coordinate[0] : coordinate[0] + offset;
+            console.log("Longitude (", longitude, ")");
+            return L.marker([coordinate[1], longitude]).addTo(this._map);
+        }
+    },
+
+    _removeFeatures: {
+        value: function (features) {
+            var i, n;
+            for (i = 0, n = features.length; i < n; i += 1) {
+                this._removeFeature(features[i]);
+            }
+        }
+    },
+
+    _removeFeature: {
+        value: function (feature) {
+            var self = this,
+                symbol;
+            this._symbols.forEach(function (featureSymbolMap) {
+                symbol = featureSymbolMap.get(feature);
+                self._map.removeLayer(symbol);
+                featureSymbolMap.delete(feature);
+            });
+        }
+    },
+
+    /*****************************************************
      * Internal Variables
      */
 
@@ -199,6 +288,33 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
      */
     _map: {
         value: undefined
+    },
+
+    _worlds: {
+        get: function () {
+            if (!this.__worlds) {
+                this.__worlds = new Set();
+            }
+            return this.__worlds;
+        }
+    },
+
+    _features: {
+        get: function () {
+            if (!this.__features) {
+                this.__features = new Set();
+            }
+            return this.__features;
+        }
+    },
+
+    _symbols: {
+        get: function () {
+            if (!this.__symbols) {
+                this.__symbols = new Map();
+            }
+            return this.__symbols;
+        }
     },
 
     /*****************************************************
@@ -232,7 +348,18 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                 height = this.element.offsetHeight,
                 position = this.center.coordinates,
                 zoom = isNaN(this.zoom) ? DEFAULT_ZOOM : this.zoom,
-                minZoom = this._minZoomForDimensions(width, height);
+                minZoom = this._minZoomForDimensions(width, height),
+                center = [position.latitude, position.longitude],
+                feature = {
+                    geometry: {
+                        type: "Point",
+                        coordinates: [position.longitude, position.latitude]
+                    },
+                    id: 1,
+                    properties: {
+                        name: "Lahaina"
+                    }
+                };
 
             this._map = L.map(this.element, {
                 doubleClickZoom: true,
@@ -241,7 +368,9 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                 zoomControl: false
             });
             this._map.addEventListener("load", this._updateCenterAndBounds.bind(this));
-            this._map.setView([position.latitude, position.longitude], (minZoom > zoom ? minZoom : zoom));
+            this._map.setView(center, (minZoom > zoom ? minZoom : zoom));
+            this._features.add(feature);
+            this._updateWorlds();
         }
     },
 
@@ -260,12 +389,12 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         value: function () {
             this._map.addEventListener("viewreset", this._handleViewReset.bind(this));
             this._map.addEventListener("moveend", this._handleMoveEnd.bind(this));
+            this._map.addEventListener("move", this._updateWorlds.bind(this));
             this._map.addEventListener("resize", this._handleResize.bind(this));
             // this._map.addEventListener("zoomstart", this._handleZoomStart.bind(this));
             // this._map.addEventListener("zoom", this._handleZoom.bind(this));
             // this._map.addEventListener("zoomend", this._handleZoomEnd.bind(this));
             this._map.addEventListener("zoomanim", this._handleZoomAnimation.bind(this));
-
         }
     },
 
@@ -275,8 +404,8 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                 mapCenter = this._map.getCenter(),
                 wrappedBounds = this._map.wrapLatLngBounds(mapBounds);
 
-            console.warn("Map bounds west (", mapBounds.getWest(), ") east (", mapBounds.getEast(), ")");
-            console.warn("Wrapped map bounds west (", wrappedBounds.getWest(), ") east (", wrappedBounds.getEast(), ")");
+            // console.warn("Map bounds west (", mapBounds.getWest(), ") east (", mapBounds.getEast(), ")");
+            // console.warn("Wrapped map bounds west (", wrappedBounds.getWest(), ") east (", wrappedBounds.getEast(), ")");
 
             this.dispatchBeforeOwnPropertyChange("bounds", this.bounds);
             this._bounds = BoundingBox.withCoordinates(
@@ -293,6 +422,21 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         }
     },
 
+    _worldIdentifierForLongitude: {
+        value: function (longitude) {
+            var identifier = 0;
+            while(longitude > 180) {
+                longitude -= 360;
+                identifier += 1;
+            }
+            while(longitude < -180) {
+                longitude += 360;
+                identifier -= 1;
+            }
+            return identifier;
+        }
+    },
+
     /*****************************************************
      * Event handlers
      */
@@ -306,6 +450,53 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     _handleMoveEnd: {
         value: function () {
             this._updateCenterAndBounds();
+        }
+    },
+
+    _handleMove: {
+        value: function () {
+
+            // console.log("West World (", westWorld, ")");
+            // console.log("East World (", eastWorld, ")");
+
+            // this._logLatLng("True South West", trueWest);
+            // this._logLatLng("True North West", trueEast);
+        }
+    },
+
+    _updateWorlds: {
+        value: function () {
+            var mapCenter = this._map.getCenter(),
+                mapSize = this._map.getSize(),
+                pixelCenter = this._map.project(mapCenter),
+                halfWidth = mapSize.x / 2,
+                leftEdge = L.point(pixelCenter.x - halfWidth, pixelCenter.y),
+                rightEdge = L.point(pixelCenter.x + halfWidth, pixelCenter.y),
+                trueWest = this._map.unproject(leftEdge),
+                trueEast = this._map.unproject(rightEdge),
+                westWorld = this._worldIdentifierForLongitude(trueWest.lng),
+                eastWorld = this._worldIdentifierForLongitude(trueEast.lng),
+                self = this, i, n;
+
+            for (i = westWorld, n = eastWorld; i <= n; i += 1) {
+                if (!this._worlds.has(i)) {
+                    this._worlds.add(i);
+                    this.needsDraw = true;
+                }
+            }
+
+            this._worlds.forEach(function (identifier) {
+                if (identifier < westWorld || identifier > eastWorld) {
+                    self._worlds.delete(identifier);
+                    self.needsDraw = true;
+                }
+            });
+        }
+    },
+
+    _logLatLng: {
+        value: function (message, coordinate) {
+            console.log(message, " lng (", coordinate.lng, ") lat (", coordinate.lat, ")");
         }
     },
 

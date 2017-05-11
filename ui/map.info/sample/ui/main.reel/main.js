@@ -19,7 +19,7 @@ exports.Main = Component.specialize(/** @lends Main.prototype */ {
         },
         set: function (value) {
             this._bounds = value;
-            console.log("Set main's bounds with value (", value, ")");
+            // console.log("Set main's bounds with value (", value, ")");
         }
     },
 
@@ -29,7 +29,7 @@ exports.Main = Component.specialize(/** @lends Main.prototype */ {
         },
         set: function (value) {
             this._center = value;
-            console.log("Set main's center with value (", value.coordinates, ")");
+            // console.log("Set main's center with value (", value.coordinates, ")");
         }
     },
 
@@ -39,7 +39,7 @@ exports.Main = Component.specialize(/** @lends Main.prototype */ {
         },
         set: function (value) {
             this._zoom = value;
-            console.log("Setting main's zoom level with value (", value, ")");
+            // console.log("Setting main's zoom level with value (", value, ")");
         }
     }
 
