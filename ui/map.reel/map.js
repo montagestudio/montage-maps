@@ -107,6 +107,49 @@ exports.Map = Component.specialize(/** @lends Map# */ {
         value: undefined
     },
 
+    /*****************************************************
+     * API
+     */
+
+    /**
+     * Adds a feature to the map.
+     * @param {Feature}
+     */
+    addFeature: {
+        value: function (feature) {
+            if (this._engine) {
+                this._engine.drawFeature(feature);
+            }
+            if (!this._features.has(feature)) {
+                this._features.add(feature);
+            }
+        }
+    },
+
+    /**
+     * Removes a feature to the map.
+     * @param {Feature}
+     */
+    removeFeature: {
+        value: function (feature) {
+            if (this._engine) {
+                this._engine.eraseFeature(feature);
+            }
+            if (this._features.has(feature)) {
+                this._features.delete(feature);
+            }
+        }
+    },
+
+    _features: {
+        get: function () {
+           if (!this.__features) {
+               this.__features = new Set();
+           }
+           return this.__features;
+        }
+    },
+
     /**
      * Sets this map to the specified bounds.
      * @method

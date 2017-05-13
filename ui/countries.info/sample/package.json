@@ -1,0 +1,17 @@
+{
+  "name": "sample",
+  "version": "0.1.0",
+  "scripts": {
+    "postinstall": "npm link ../../.."
+  },
+  "dependencies": {
+    "montage": "montagejs/montage#master",
+    "montage-data": "^1.0.0-alpha1",
+    "montage-geo": "montagestudio/montage-geo",
+    "montage-maps": "../../.."
+  },
+  "private": true,
+  "bundle": [
+    "ui/main.reel"
+  ]
+}
