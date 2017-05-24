@@ -6,7 +6,7 @@
   },
   "dependencies": {
     "montage": "montagejs/montage#master",
-    "montage-data": "^1.0.0-alpha1",
+    "montage-data": "montagestudio/montage-data.git#1.0.0-alpha3",    
     "montage-geo": "montagestudio/montage-geo",
     "montage-maps": "../../.."
   },
