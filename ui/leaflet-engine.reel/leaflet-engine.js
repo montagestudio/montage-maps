@@ -2,6 +2,7 @@ var Component = require("montage/ui/component").Component,
     BoundingBox = require("montage-geo/logic/model/bounding-box").BoundingBox,
     CartesianPoint = require("logic/model/point").Point,
     LineString = require("montage-geo/logic/model/line-string").LineString,
+    Map = require("montage/collections/map").Map,
     MultiLineString = require("montage-geo/logic/model/multi-line-string").MultiLineString,
     MultiPoint = require("montage-geo/logic/model/multi-point").MultiPoint,
     MultiPolygon = require("montage-geo/logic/model/multi-polygon").MultiPolygon,
@@ -17,7 +18,7 @@ var Component = require("montage/ui/component").Component,
  */
 exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
-    /*****************************************************
+    /**************************************************************************
      * Properties
      */
 
@@ -67,8 +68,8 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     },
 
     /**
-     * The maximum bounds for the map.  The user is prevented from
-     * travelling outside the maximum bounds.
+     * The maximum bounds for the map.  The user is prevented from travelling
+     * outside the maximum bounds.
      *
      * @public
      * @type {BoundingBox}
@@ -78,8 +79,8 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     },
 
     /**
-     * The current pixel origin of the map.  Overlays may need to adjust
-     * their position based upon the pixel origin.
+     * The current pixel origin of the map.  Overlays may need to adjust their
+     * position based upon the pixel origin.
      *
      * @public
      * @type {montage-maps/logic/model/Point}
@@ -130,7 +131,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         }
     },
 
-    /*****************************************************
+    /**************************************************************************
      * Add / Remove Features
      */
 
@@ -144,10 +145,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                     normalizedCoordinates = this._normalizeCoordinates(geometry);
                     this._normalizedCoordinates.set(geometry, normalizedCoordinates);
                 }
-                this._featureQueue.push({
-                    feature: feature,
-                    action: "draw"
-                });
+                this._featureQueue.set(feature, "draw");
                 this.needsDraw = true;
             }
         }
@@ -170,10 +168,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     eraseFeature: {
         value: function (feature) {
             if (this._features.has(feature)) {
-                this._featureQueue.push({
-                    feature: feature,
-                    action: "erase"
-                });
+                this._featureQueue.set(feature, "erase");
                 this.needsDraw = true;
             }
         }
@@ -208,21 +203,20 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     _featureQueue: {
         get: function () {
             if (!this.__featureQueue) {
-                this.__featureQueue = [];
+                this.__featureQueue = new Map();
             }
             return this.__featureQueue;
         }
     },
 
-    /*****************************************************
+    /**************************************************************************
      * Draw Cycle
      */
 
     draw: {
         value: function () {
             var self = this,
-                worlds,
-                queuedItem;
+                worlds;
 
             if (this._map && this._worldsDidChange) {
                 worlds = this._worlds;
@@ -242,20 +236,31 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                 this._worldsDidChange = false;
             }
 
-            while(this._map && this._featureQueue.length) {
-                queuedItem = this._featureQueue.shift();
-                if (queuedItem.action === "draw") {
-                    this._drawFeature(queuedItem.feature);
-                } else if (queuedItem.action === "erase") {
-                    this._eraseFeature(queuedItem.feature);
-                }
+            if (this._map) {
+                this._processFeatureQueue();
             }
 
-            if (this._featureQueue.length || this._worldsDidChange) {
+            if (this._featureQueue.size || this._worldsDidChange) {
                 setTimeout(function () {
                     self.needsDraw = true;
                 }, 100);
             }
+        }
+    },
+
+    _processFeatureQueue: {
+        value: function () {
+            var queueIterator = this._featureQueue.keys(),
+                feature, action;
+            while (this._map && (feature = queueIterator.next().value)) {
+                action = this._featureQueue.get(feature);
+                if (action === "draw") {
+                    this._drawFeature(feature);
+                } else if (action === "erase") {
+                    this._eraseFeature(feature);
+                }
+            }
+            this._featureQueue.clear();
         }
     },
 
@@ -277,7 +282,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         value: false
     },
 
-    /*****************************************************
+    /**************************************************************************
      * Drawing Features / Symbols
      */
 
@@ -518,7 +523,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         }
     },
 
-    /*****************************************************
+    /**************************************************************************
      * Internal Variables
      */
 
@@ -532,13 +537,12 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
     /**
      *
-     * The current set of visible "Worlds".  To compensate for
-     * a limitation with Leaflet the leaflet engine needs to keep
-     * track of which copy (or copies) of the world is currently
-     * visible.  Crossing the anti-meridian by travelling West or East
-     * will result in going to a new world.  Worlds are identified
-     * by the number of times the World has rotated East (positive) or
-     * West (negative).
+     * The current set of visible "Worlds".  To compensate for a limitation
+     * with Leaflet the leaflet engine needs to keep track of which copy (or
+     * copies) of the world is currently visible.  Crossing the anti-meridian
+     * by travelling West or East will result in going to a new world.  Worlds
+     * are identified by the number of times the World has rotated East (posi-
+     * tive) or West (negative).
      *
      * @private
      * @type {Set<number>}
@@ -559,10 +563,9 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     },
 
     /**
-     * The set of all features that have been added to the engine.
-     * The engine needs this set to keep track of which features have
-     * been added so that it can redraw them when the map rotates to
-     * a copy of the world.
+     * The set of all features that have been added to the engine.  The engine
+     * needs this set to keep track of which features have been added so that
+     * it can redraw them when the map rotates to a copy of the world.
      * @private
      * @type {Set<Feature>}
      */
@@ -576,8 +579,9 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     },
 
     /**
-     * A map whose key is a World identifier and whose value is a
-     * map of features to symbols that exist for that copy of the World.
+     * A map whose key is a World identifier and whose value is a map of features
+     * to symbols that exist for that copy of the World.
+     *
      * @private
      * @type {Map<Number, Map<Feature, Symbol|Array<Symbol>>}
      */
@@ -621,8 +625,8 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     },
 
     /**
-     * Responsible for initializing the Leaflet map and setting
-     * the default options as well as location.
+     * Responsible for initializing the Leaflet map and setting the default
+     * options as well as location.
      * @private
      * @method
      */
@@ -647,12 +651,12 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         }
     },
 
-    // TODO - remove this method.  The basemap should be added via a layer.
+    // TODO - remove this method.  The base map should be added via a layer.
     _initializeBaseMap: {
         value: function () {
             var map = this._map;
             if (map) {
-                L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {
+                L.tileLayer('http://localhost/~jonathanmiller/contour/assets/basemaps/light/{z}/{x}/{y}.png', {
                     attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
                 }).addTo(map);
             }
@@ -661,6 +665,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
     /**
      * Responsible for initializing event listeners on the Leaflet Map
+     *
      * @private
      * @method
      */
@@ -690,7 +695,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                 this._normalizeLongitude(mapBounds.getWest()), mapBounds.getSouth(),
                 this._normalizeLongitude(mapBounds.getEast()), mapBounds.getNorth()
             );
-            this._logBoundingBox(this._bounds);
+            // this._logBoundingBox(this._bounds);
             this.dispatchOwnPropertyChange("bounds", this.bounds);
             this.dispatchBeforeOwnPropertyChange("center", this.center);
             this._center = Point.withCoordinates([mapCenter.lng, mapCenter.lat]);

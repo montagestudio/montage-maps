@@ -9,13 +9,12 @@ var Component = require("montage/ui/component").Component,
  */
 exports.Map = Component.specialize(/** @lends Map# */ {
 
-    /*****************************************************
+    /**************************************************************************
      * Properties
      */
 
     /**
-     * The current bounds of the map.  To set this value use
-     * Map#setBounds
+     * The current bounds of the map.
      *
      * @type {BoundingBox}
      */
@@ -24,8 +23,8 @@ exports.Map = Component.specialize(/** @lends Map# */ {
     },
 
     /**
-     * The current center of the map.  Setting this value will
-     * update the map's position.
+     * The current center of the map.  Setting this value will update the map's
+     * position.
      *
      * @type {Point}
      */
@@ -68,7 +67,7 @@ exports.Map = Component.specialize(/** @lends Map# */ {
         }
     },
 
-    /*****************************************************
+    /**************************************************************************
      * Private Variables
      */
 
@@ -81,8 +80,8 @@ exports.Map = Component.specialize(/** @lends Map# */ {
                 );
                 this.defineBindings({
                     "bounds": {"<-": "bounds", source: this.__engine},
-                    "zoom": {"<->": "zoom", source: this.__engine},
-                    "center": {"<->": "center", source: this.__engine}
+                    "center": {"<->": "center", source: this.__engine},
+                    "zoom": {"<->": "zoom", source: this.__engine}
                 });
             }
             return this.__engine;
@@ -95,8 +94,8 @@ exports.Map = Component.specialize(/** @lends Map# */ {
                 this.__engine = value;
                 this.defineBindings({
                     "bounds": {"<-": "bounds", source: this.__engine},
-                    "zoom": {"<->": "zoom", source: this.__engine},
-                    "center": {"<->": "center", source: this.__engine}
+                    "center": {"<->": "center", source: this.__engine},
+                    "zoom": {"<->": "zoom", source: this.__engine}
                 });
             }
         }
@@ -107,7 +106,7 @@ exports.Map = Component.specialize(/** @lends Map# */ {
         value: undefined
     },
 
-    /*****************************************************
+    /**************************************************************************
      * API
      */
 
@@ -127,7 +126,7 @@ exports.Map = Component.specialize(/** @lends Map# */ {
     },
 
     /**
-     * Removes a feature to the map.
+     * Removes a feature from the map.
      * @param {Feature}
      */
     removeFeature: {

@@ -40,7 +40,6 @@ exports.Main = Component.specialize(/** @lends Main.prototype */ {
                     countries.forEach(function (country) {
                         self._map.addFeature(country);
                     });
-                    console.log("Countries (", countries, ")");
                 });
             }
         }

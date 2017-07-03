@@ -1,4 +1,8 @@
-.montageMap-Map-engine {
+.montageMaps-Map {
+    background: black;
+}
+
+.montageMaps-Map-engine {
     position: absolute;
     bottom: 0;
     left: 0;
