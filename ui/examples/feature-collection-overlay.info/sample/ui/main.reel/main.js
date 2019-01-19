@@ -38,7 +38,7 @@ exports.Main = Component.specialize(/** @lends Main.prototype */ {
                 self = this;
                 this.mainService.fetchData(selector).then(function (countries) {
                     countries.forEach(function (country) {
-                        self._map.drawFeature(country);
+                        self._map.addFeature(country);
                     });
                 });
             }

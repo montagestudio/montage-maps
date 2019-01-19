@@ -2,11 +2,11 @@
     "name": "sample",
     "version": "0.1.0",
     "scripts": {
-        "postinstall": "npm link ../../.."
+        "postinstall": "npm link ../../../.."
     },
     "dependencies": {
         "montage-geo": "montagestudio/montage-geo",
-        "montage-maps": "../../..",
+        "montage-maps": "../../../..",
         "montage": "montagejs/montage#master"
     },
     "private": true,

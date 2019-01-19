@@ -2,6 +2,7 @@ console.log('montage-testing', 'Start');
 module.exports = require("montage-testing").run(require, [
     "spec/cluster-organizer",
     "spec/feature-cluster",
+    "spec/leaflet-engine",
     "spec/point"
 
 ]).then(function () {

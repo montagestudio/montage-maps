@@ -1,16 +1,27 @@
 var Component = require("montage/ui/component").Component,
     BoundingBox = require("montage-geo/logic/model/bounding-box").BoundingBox,
-    CartesianPoint = require("logic/model/point").Point,
+    Enum = require("montage/core/enum").Enum,
+    Enumeration = require("montage/data/model/enumeration").Enumeration,
     LineString = require("montage-geo/logic/model/line-string").LineString,
     Map = require("montage/collections/map").Map,
     MultiLineString = require("montage-geo/logic/model/multi-line-string").MultiLineString,
     MultiPoint = require("montage-geo/logic/model/multi-point").MultiPoint,
     MultiPolygon = require("montage-geo/logic/model/multi-polygon").MultiPolygon,
     L = require("leaflet"),
+    Point2D = require("montage-geo/logic/model/point-2d").Point2D,
     Polygon = require("montage-geo/logic/model/polygon").Polygon,
     Point = require("montage-geo/logic/model/point").Point,
-    Set = require("collections/set"),
+    Set = require("montage/collections/set"),
     DEFAULT_ZOOM = 4;
+
+var DRAW_QUEUE_COMMANDS = new Enum().initWithMembers("DRAW", "ERASE", "REDRAW");
+var GEOMETRY_CONSTRUCTOR_TYPE_MAP = new Map();
+GEOMETRY_CONSTRUCTOR_TYPE_MAP.set(LineString, "LineString");
+GEOMETRY_CONSTRUCTOR_TYPE_MAP.set(MultiLineString, "MultiLineString");
+GEOMETRY_CONSTRUCTOR_TYPE_MAP.set(MultiPoint, "MultiPoint");
+GEOMETRY_CONSTRUCTOR_TYPE_MAP.set(MultiPolygon, "MultiPolygon");
+GEOMETRY_CONSTRUCTOR_TYPE_MAP.set(Point, "Point");
+GEOMETRY_CONSTRUCTOR_TYPE_MAP.set(Polygon, "Polygon");
 
 /**
  * @class LeafletEngine
@@ -89,7 +100,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     pixelOrigin: {
         get: function () {
             if (!this._pixelOrigin) {
-                this._pixelOrigin = CartesianPoint.withCoordinates(0, 0);
+                this._pixelOrigin = Point2D.withCoordinates(0, 0);
             }
             return this._pixelOrigin;
         }
@@ -136,16 +147,35 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
      */
 
     drawFeature: {
-        value: function (feature) {
-            var normalizedCoordinates,
-                geometry;
-            if (!this._features.has(feature)) {
-                if (this._requiresNormalization(feature)) {
-                    geometry = feature.geometry;
-                    normalizedCoordinates = this._normalizeCoordinates(geometry);
-                    this._normalizedCoordinates.set(geometry, normalizedCoordinates);
-                }
-                this._featureQueue.set(feature, "draw");
+        value: function (feature, processImmediately) {
+            this._prepareFeatureForDrawing(feature);
+            if (processImmediately && this._map) {
+                this._drawFeature(feature);
+            } else {
+                this._featureQueue.set(feature, DRAW_QUEUE_COMMANDS["DRAW"]);
+                this.needsDraw = true;
+            }
+        }
+    },
+    
+    eraseFeature: {
+        value: function (feature, processImmediately) {
+            if (processImmediately && this._map) {
+                this._eraseFeature(feature);
+            } else {
+                this._featureQueue.set(feature, DRAW_QUEUE_COMMANDS["ERASE"]);
+                this.needsDraw = true;
+            }
+        }
+    },
+    
+    redrawFeature: {
+        value: function (feature, processImmediately) {
+            this._prepareFeatureForDrawing(feature);
+            if (processImmediately && this._map) {
+                this._redrawFeature(feature)
+            } else {
+                this._featureQueue.set(feature, DRAW_QUEUE_COMMANDS["REDRAW"]);
                 this.needsDraw = true;
             }
         }
@@ -164,25 +194,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             }
         }
     },
-
-    eraseFeature: {
-        value: function (feature) {
-            if (this._features.has(feature)) {
-                this._featureQueue.set(feature, "erase");
-                this.needsDraw = true;
-            }
-        }
-    },
-
-    _eraseFeatures: {
-        value: function (features) {
-            var i, n;
-            for (i = 0, n = features.length; i < n; i += 1) {
-                this._eraseFeature(features[i]);
-            }
-        }
-    },
-
+    
     _eraseFeature: {
         value: function (feature) {
             var self = this;
@@ -194,12 +206,39 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             if (this._features.has(feature)) {
                 this._features.delete(feature);
             }
-            if (this._normalizedCoordinates.has(feature)) {
-                this._normalizedCoordinates.delete(feature);
+            if (this._processedCoordinates.has(feature)) {
+                this._processedCoordinates.delete(feature);
             }
         }
     },
 
+    _redrawFeature: {
+        value: function (feature) {
+            var self = this;
+            this._symbols.forEach(function (featureSymbolMap, identifier) {
+                var symbol = featureSymbolMap.get(feature);
+                self._removeSymbol(symbol);
+                symbol = self._drawSymbol(feature, identifier * 360);
+                featureSymbolMap.set(feature, symbol);
+            });
+        }
+    },
+    
+    _prepareFeatureForDrawing: {
+        value: function (feature) {
+            var processedCoordinates = this._processCoordinates(feature.geometry);
+            this._processedCoordinates.set(feature, processedCoordinates);
+        }
+    },
+    
+    _processCoordinates: {
+        value: function (geometry) {
+            var symbolId = GEOMETRY_CONSTRUCTOR_TYPE_MAP.get(geometry.constructor),
+                symbolizer = Symbolizer.forId(symbolId);
+            return symbolizer.project(geometry.coordinates);
+        }
+    },
+    
     _featureQueue: {
         get: function () {
             if (!this.__featureQueue) {
@@ -254,9 +293,11 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                 feature, action;
             while (this._map && (feature = queueIterator.next().value)) {
                 action = this._featureQueue.get(feature);
-                if (action === "draw") {
+                if (action === DRAW_QUEUE_COMMANDS["DRAW"]) {
                     this._drawFeature(feature);
-                } else if (action === "erase") {
+                } else if (action === DRAW_QUEUE_COMMANDS["ERASE"]) {
+                    this._eraseFeature(feature);
+                } else if (action === DRAW_QUEUE_COMMANDS["REDRAW"]) {
                     this._eraseFeature(feature);
                 }
             }
@@ -305,190 +346,21 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     _drawSymbol: {
         value: function (feature, offset) {
             var geometry = feature.geometry,
-                isPoint = geometry instanceof Point,
-                isMultiPoint = !isPoint && geometry instanceof MultiPoint,
-                isLineString = !isMultiPoint && geometry instanceof LineString,
-                isMultiLineString = !isLineString && geometry instanceof MultiLineString,
-                isPolygon = !isMultiLineString && geometry instanceof Polygon,
-                isMultiPolygon = !isPolygon && geometry instanceof MultiPolygon;
-            return  isPoint ?           this._drawPointSymbol(geometry, offset) :
-                    isMultiPoint ?      this._drawMultiPointSymbol(geometry, offset) :
-                    isLineString ?      this._drawLineSymbol(geometry, offset) :
-                    isMultiLineString ? this._drawMultiLineStringSymbol(geometry, offset) :
-                    isPolygon ?         this._drawPolygonSymbol(geometry, offset) :
-                    isMultiPolygon ?    this._drawMultiPolygonSymbol(geometry, offset) :
-                                        null;
-        }
-    },
-
-    _drawPointSymbol: {
-        value: function (geometry, offset) {
-            var position = geometry.coordinates,
-                longitude = position.longitude;
-            if (offset !== 0) {
-                longitude += offset;
+                symbolId = GEOMETRY_CONSTRUCTOR_TYPE_MAP.get(geometry.constructor),
+                symbolizer = Symbolizer.forId(symbolId),
+                coordinates = this._processedCoordinates.get(feature),
+                symbols = symbolizer.draw(coordinates, offset),
+                map = this._map;
+            
+            if (symbolizer.isMultiGeometry) {
+                symbols.forEach(function (symbol) {
+                    symbol.addTo(map);
+                })
+            } else {
+                symbols.addTo(map);
             }
-            return L.marker([position.latitude, longitude]).addTo(this._map);
-        }
-    },
-
-    _drawMultiPointSymbol: {
-        value: function (geometry, offset) {
-            var self = this;
-            return geometry.coordinates.map(function (position) {
-                var longitude = position.longitude;
-                if (offset !== 0) {
-                    longitude += offset;
-                }
-                return L.marker([position.latitude, longitude]).addTo(self._map);
-            });
-        }
-    },
-
-    _drawLineSymbol: {
-        value: function (geometry, offset) {
-            var coordinates = this._normalizedCoordinates.get(geometry) || geometry.coordinates;
-            return L.polyline(this._flipCoordinatesWithOffset(coordinates, offset)).addTo(this._map);
-        }
-    },
-
-    _drawMultiLineStringSymbol: {
-        value: function (geometry, offset) {
-            var self = this;
-            return geometry.coordinates.map(function (lineString) {
-                return L.polyline(self._flipCoordinatesWithOffset(lineString, offset)).add(self._map);
-            });
-        }
-    },
-
-    _drawPolygonSymbol: {
-        value: function (geometry, offset) {
-            var rings = this._normalizedCoordinates.get(geometry) || geometry.coordinates;
-            return L.polygon(this._prepareRingsWithOffset(rings, offset)).addTo(this._map);
-        }
-    },
-
-    // TODO: Cache all coordinates as leaflet coordinates.
-    // TODO: Fix normalized coordinates for multi-polygon
-    _drawMultiPolygonSymbol: {
-        value: function (geometry, offset) {
-            var polygons = this._normalizedCoordinates.get(geometry) || geometry.coordinates,
-                self = this;
-            return polygons.map(function (polygon) {
-                return self._drawPolygonSymbol(polygon, offset);
-            });
-        }
-    },
-
-    _flipCoordinatesWithOffset: {
-        value: function (coordinates, offset) {
-            return coordinates.map(function (coordinate) {
-                var longitude = coordinate.longitude;
-                if (offset !== 0) {
-                    longitude += offset;
-                }
-                return [coordinate.latitude, longitude];
-            });
-        }
-    },
-
-    _prepareRingsWithOffset: {
-        value: function (rings, offset) {
-            var self = this;
-            return rings.map(function (ring) {
-                return self._prepareRingWithOffset(ring, offset);
-            });
-        }
-    },
-
-    _prepareRingWithOffset: {
-        value: function (ring, offset) {
-            var coordinates = [],
-                position, longitude,
-                i, n;
-            for (i = 0, n = ring.length - 1; i < n; i += 1) {
-                position = ring[i];
-                longitude = position.longitude;
-                longitude += offset;
-                coordinates.push([position.latitude, longitude]);
-            }
-            return coordinates;
-        }
-    },
-
-    _requiresNormalization: {
-        value: function (feature) {
-            var bounds = feature.bounds;
-            return bounds.xMin > bounds.xMax;
-        }
-    },
-
-    _normalizeCoordinates: {
-        value: function (geometry) {
-            var coordinates = geometry.coordinates,
-                isLineString = geometry instanceof LineString,
-                isMultiLineString = !isLineString && geometry instanceof MultiLineString,
-                isPolygon = !isMultiLineString && geometry instanceof Polygon,
-                isMultiPolygon = !isPolygon && geometry instanceof MultiPolygon;
-            return  isLineString ?      this._normalizeLineString(coordinates) :
-                    isMultiLineString ? this._normalizeMultiLineString(coordinates) :
-                    isPolygon ?         this._normalizePolygon(coordinates) :
-                    isMultiPolygon ?    this._normalizeMultiPolygon(coordinates) :
-                                        coordinates;
-        }
-    },
-
-    _normalizeLineString: {
-        value: function (lineString) {
-            var self = this;
-            return lineString.map(function (position) {
-                return self._normalizePosition(position);
-            });
-        }
-    },
-
-    _normalizeMultiLineString: {
-        value: function (multiLineString) {
-            var self = this;
-            return multiLineString.map(function (lineString) {
-                var coordinates = self._normalizeLineString(lineString.coordinates);
-                return LineString.withCoordinates(coordinates);
-            });
-        }
-    },
-
-    _normalizePolygon: {
-        value: function (rings) {
-            var self = this;
-            return rings.map(function (ring) {
-                return ring.map(function (position) {
-                    return self._normalizePosition(position);
-                });
-            });
-        }
-    },
-
-    _normalizeMultiPolygon: {
-        value: function (polygons) {
-            var self = this;
-            return polygons.map(function (polygon) {
-                var coordinates = polygon.coordinates.map(function (ring) {
-                    return ring.map(function (position) {
-                        var normalizedPosition = self._normalizePosition(position);
-                        return [normalizedPosition.longitude, position.latitude];
-                    });
-                });
-                return Polygon.withCoordinates(coordinates);
-            });
-        }
-    },
-
-    _normalizePosition: {
-        value: function (position) {
-            var Position = exports.LeafletEngine.Position,
-                longitude = position.longitude;
-            if (longitude < 0) longitude += 360;
-            return Position.withCoordinates(longitude, position.latitude);
+            
+            return symbols;
         }
     },
 
@@ -514,12 +386,12 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         }
     },
 
-    _normalizedCoordinates: {
+    _processedCoordinates: {
         get: function () {
-            if (!this.__normalizedCoordinates) {
-                this.__normalizedCoordinates = new Map();
+            if (!this.__processedCoordinates) {
+                this.__processedCoordinates = new Map();
             }
-            return this.__normalizedCoordinates;
+            return this.__processedCoordinates;
         }
     },
 
@@ -656,7 +528,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         value: function () {
             var map = this._map;
             if (map) {
-                L.tileLayer('http://localhost/~jonathanmiller/contour/assets/basemaps/light/{z}/{x}/{y}.png', {
+                L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {
                     attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
                 }).addTo(map);
             }
@@ -776,7 +648,8 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                 zoom = map.getZoom(),
                 point = map.unproject(pixelOrigin),
                 origin = map.project(point, zoom).round();
-            this.pixelOrigin = CartesianPoint.withCoordinates(origin.x, origin.y);
+
+            this.pixelOrigin = Point2D.withCoordinates(origin.x, origin.y);
         }
     },
 
@@ -994,3 +867,218 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     }
 
 });
+
+var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
+    
+    id: {
+        value: undefined
+    },
+
+    draw: {
+        value: function (coordinates, offset) {
+            return null;
+        }
+    },
+    
+    project: {
+        value: function (coordinates) {
+        
+        }
+    },
+    
+    isMultiGeometry: {
+        value: false
+    },
+    
+    _addLongitudeOffsetToPath: {
+        value: function (path, offset) {
+            return path.map(function (coordinates) {
+                var longitude = coordinates[1];
+                if (offset !== 0) {
+                    longitude += offset;
+                }
+                return [coordinates[0], longitude];
+            });
+        }
+    },
+    
+    _adjustPathForAntiMeridian: {
+        value: function (path) {
+            
+            var shift = 0,
+                previousCoordinate;
+            
+            return path.map(function (coordinate) {
+                
+                var longitude = coordinate.longitude,
+                    previousLongitude,
+                    bearing;
+                
+                if (previousCoordinate) {
+                    previousLongitude = previousCoordinate.longitude;
+                    bearing = previousCoordinate.bearing(coordinate);
+                    if (bearing > 0 && bearing < 180 &&
+                        previousLongitude > 0 && longitude < 0) {
+                        shift += 1;
+                    } else if (
+                        bearing > 180 && bearing < 360 &&
+                        previousLongitude < 0 && longitude > 0) {
+                        shift -= 1;
+                    }
+                }
+                
+                previousCoordinate = coordinate;
+                return [coordinate.latitude, longitude + shift * 360];
+                
+            });
+        }
+    },
+    
+    _processPoint: {
+        value: function (coordinates) {
+            return [coordinates.latitude, coordinates.longitude];
+        }
+    }
+    
+}, {
+
+    POINT: ["Point", {
+
+        draw: {
+            value: function (coordinates, offset) {
+                var longitude = coordinates[1];
+                if (offset !== 0) {
+                    longitude += offset;
+                }
+                return L.marker([coordinates[0], longitude]);
+            }
+        },
+
+        project: {
+            value: function (coordinates) {
+                return [coordinates.latitude, coordinates.longitude];
+            }
+        }
+    
+    }],
+    
+    MULTI_POINT: ["MultiPoint", {
+
+        draw: {
+            value: function (coordinates, offset) {
+                return coordinates.map(function (coordinate) {
+                    var longitude = coordinate[1];
+                    if (offset !== 0) {
+                        longitude += offset;
+                    }
+                    return L.marker([coordinates[0], longitude]);
+                });
+            }
+        },
+        
+        isMultiGeometry: {
+            value: true
+        },
+    
+        project: {
+            value: function (coordinates) {
+                return coordinates.map(this._processPoint);
+            }
+        }
+
+    }],
+
+    LINE_STRING: ["LineString", {
+
+        draw: {
+            value: function (coordinates, offset) {
+                return L.polyline(this._addLongitudeOffsetToPath(coordinates, offset));
+            }
+        },
+    
+        project: {
+            value: function (coordinates) {
+                return this._adjustPathForAntiMeridian(coordinates);
+            }
+        }
+
+    }],
+    
+    MULTI_LINE_STRING: ["MultiLineString", {
+
+        draw: {
+            value: function (coordinates, offset) {
+                var fn = this._addLongitudeOffsetToPath;
+                return coordinates.map(function (path) {
+                    return L.polyline(fn(path, offset));
+                });
+            }
+        },
+    
+        isMultiGeometry: {
+            value: true
+        },
+    
+        project: {
+            value: function (multiLineString) {
+                return multiLineString.map(function (lineString) {
+                    return Symbolizer.LINE_STRING.project(lineString.coordinates);
+                });
+            }
+        }
+    
+    }],
+    
+    POLYGON: ["Polygon", {
+
+        draw: {
+            value: function (coordinates, offset) {
+                var fn = this._addLongitudeOffsetToPath,
+                    rings = coordinates.map(function (ring) {
+                        return fn(ring, offset);
+                    });
+                return L.polygon(rings);
+            }
+        },
+    
+        project: {
+            value: function (rings) {
+                var fn = this._adjustPathForAntiMeridian;
+                return rings.map(function (ring) {
+                    return fn(ring);
+                });
+            }
+        }
+
+    }],
+    
+    MULTI_POLYGON: ["MultiPolygon", {
+    
+        draw: {
+            value: function (polygons, offset) {
+                var fn = this._addLongitudeOffsetToPath;
+                return polygons.map(function (polygon) {
+                    var coordinates = polygon.map(function (path) {
+                        return fn(path, offset);
+                    });
+                    return L.polygon(coordinates);
+                });
+            }
+        },
+    
+        isMultiGeometry: {
+            value: true
+        },
+    
+        project: {
+            value: function (polygons) {
+                return polygons.map(function (polygon) {
+                    return Symbolizer.POLYGON.project(polygon.coordinates);
+                });
+            }
+        }
+
+    }]
+    
+});
+

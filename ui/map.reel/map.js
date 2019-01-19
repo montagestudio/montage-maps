@@ -3,6 +3,10 @@ var Component = require("montage/ui/component").Component,
     LeafletEngine = require("ui/leaflet-engine.reel").LeafletEngine,
     Point = require("montage-geo/logic/model/point").Point;
 
+var MAX_BOUNDS = BoundingBox.withCoordinates(
+    -Infinity, -85.05112878, Infinity, 85.05112878
+);
+
 /**
  * @class Map
  * @extends Component
@@ -42,6 +46,9 @@ exports.Map = Component.specialize(/** @lends Map# */ {
         }
     },
 
+    /**
+     * @type {BoundingBox}
+     */
     maxBounds: {
         get: function () {
             return this._maxBounds;
@@ -73,37 +80,142 @@ exports.Map = Component.specialize(/** @lends Map# */ {
 
     _engine: {
         get: function () {
+            var engine;
             if (!this.__engine) {
-                this.__engine = new LeafletEngine();
-                this.__engine.maxBounds = this.maxBounds || BoundingBox.withCoordinates(
-                    -Infinity, -85.05112878, Infinity, 85.05112878
-                );
-                this.defineBindings({
-                    "bounds": {"<-": "bounds", source: this.__engine},
-                    "center": {"<->": "center", source: this.__engine},
-                    "zoom": {"<->": "zoom", source: this.__engine}
-                });
+                engine = new LeafletEngine();
+                engine.maxBounds = this.maxBounds || MAX_BOUNDS;
+                this._startEngine(engine);
+                this.__engine = engine;
             }
             return this.__engine;
         },
         set: function (value) {
             if (value && value !== this.__engine) {
-                this.cancelBinding("bounds");
-                this.cancelBinding("center");
-                this.cancelBinding("zoom");
+                this._shutdownEngine(this.__engine);
                 this.__engine = value;
-                this.defineBindings({
-                    "bounds": {"<-": "bounds", source: this.__engine},
-                    "center": {"<->": "center", source: this.__engine},
-                    "zoom": {"<->": "zoom", source: this.__engine}
-                });
+                this._startEngine(value);
             }
+        }
+    },
+
+    _shutdownEngine: {
+        value: function (engine) {
+            if (engine) {
+                this._cancelEngineBindings(engine);
+                this._clearEngineFeatures(engine);
+                this._removeEngineEventListeners(engine);
+            }
+        }
+    },
+
+    _startEngine: {
+        value: function (engine) {
+            this._defineEngineBindings(engine);
+            this._drawAllFeatures(engine);
+            this._addEngineEventListeners(engine);
+        }
+    },
+    
+    _defineEngineBindings: {
+        value: function (engine) {
+            this.defineBindings({
+                "bounds": {"<-": "bounds", source: engine},
+                "center": {"<->": "center", source: engine},
+                "zoom": {"<->": "zoom", source: engine}
+            });
+        }
+    },
+
+    _cancelEngineBindings: {
+        value: function (engine) {
+            this.cancelBinding("bounds");
+            this.cancelBinding("center");
+            this.cancelBinding("zoom");
+        }
+    },
+
+    _clearEngineFeatures: {
+        value: function (engine) {
+            var iterator = this._features.values(),
+                feature;
+            while (feature = iterator.next().value) {
+                engine.eraseFeature(feature);
+            }
+        }
+    },
+
+    _drawAllFeatures: {
+        value: function (engine) {
+            var iterator = this._features.values(),
+                feature;
+            while (feature = iterator.next().value) {
+                engine.drawFeature(feature);
+            }
+        }
+    },
+
+    _removeEngineEventListeners: {
+        value: function (engine) {
+            engine.removeEventListener("didZoom", this);
+            engine.removeEventListener("willZoom", this);
+            engine.removeEventListener("featureMouseout", this);
+            engine.removeEventListener("featureMouseover", this);
+            engine.removeEventListener("featureSelection", this);
         }
     },
 
     // In the future, this will be used to specify the current engine.
     _engineKey: {
         value: undefined
+    },
+
+    _addEngineEventListeners: {
+        value: function (engine) {
+            engine.addEventListener("didZoom", this);
+            engine.addEventListener("willZoom", this);
+            engine.addEventListener("featureMouseout", this);
+            engine.addEventListener("featureMouseover", this);
+            engine.addEventListener("featureSelection", this);
+        }
+    },
+
+    /**************************************************************************
+     * Event Handlers
+     */
+
+    handleDidZoom: {
+        value: function (event) {
+            event.stopPropagation();
+            this.dispatchEventNamed("didZoom", true, true, event.detail);
+        }
+    },
+
+    handleWillZoom: {
+        value: function (event) {
+            event.stopPropagation();
+            this.dispatchEventNamed("willZoom", true, true, event.detail);
+        }
+    },
+
+    handleFeatureMouseout: {
+        value: function (event) {
+            event.stopPropagation();
+            this.dispatchEventNamed("featureMouseout", true, true, event.detail);
+        }
+    },
+
+    handleFeatureMouseover: {
+        value: function (event) {
+            event.stopPropagation();
+            this.dispatchEventNamed("featureMouseover", true, true, event.detail);
+        }
+    },
+
+    handleFeatureSelection: {
+        value: function (event) {
+            event.stopPropagation();
+            this.dispatchEventNamed("featureSelection", true, true, event.detail);
+        }
     },
 
     /**************************************************************************
@@ -113,11 +225,13 @@ exports.Map = Component.specialize(/** @lends Map# */ {
     /**
      * Adds a feature to the map.
      * @param {Feature}
+     * @param {boolean} [processImmediately = false] If true will execute the
+     *                  command without using the deferred draw loop.
      */
-    addFeature: {
-        value: function (feature) {
+    drawFeature: {
+        value: function (feature, processImmediately) {
             if (this._engine) {
-                this._engine.drawFeature(feature);
+                this._engine.drawFeature(feature, processImmediately);
             }
             if (!this._features.has(feature)) {
                 this._features.add(feature);
@@ -126,13 +240,29 @@ exports.Map = Component.specialize(/** @lends Map# */ {
     },
 
     /**
+     * Redraws a feature on the map.
+     * @param {Feature}
+     * @param {boolean} [processImmediately = false] If true will execute the
+     *                  command without using the deferred draw loop.
+     */
+    redrawFeature: {
+        value: function (feature, processImmediately) {
+            if (this._engine && this._features.has(feature)) {
+                this._engine.redrawFeature(feature, processImmediately);
+            }
+        }
+    },
+
+    /**
      * Removes a feature from the map.
      * @param {Feature}
+     * @param {boolean} [processImmediately = false] If true will execute the
+     *                  command without using the deferred draw loop.
      */
-    removeFeature: {
-        value: function (feature) {
+    eraseFeature: {
+        value: function (feature, processImmediately) {
             if (this._engine) {
-                this._engine.eraseFeature(feature);
+                this._engine.eraseFeature(feature, processImmediately);
             }
             if (this._features.has(feature)) {
                 this._features.delete(feature);
@@ -189,6 +319,10 @@ exports.Map = Component.specialize(/** @lends Map# */ {
         }
     },
 
+    /**
+     * @method
+     * @param {number} zoom level
+     */
     setZoom: {
         value: function (value) {
             this.zoom = value;

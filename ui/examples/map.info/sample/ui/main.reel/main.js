@@ -38,8 +38,8 @@ exports.Main = Component.specialize(/** @lends Main.prototype */ {
                         }
                 });
 
-                this.__map.addFeature(lahaina);
-                this.__map.addFeature(antiMeridianLine);
+                this.__map.drawFeature(lahaina);
+                this.__map.drawFeature(antiMeridianLine);
             }
         }
     },

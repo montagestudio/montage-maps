@@ -21,8 +21,8 @@
         "montage-geo": "../node_modules/montage-geo"
     },
     "dependencies": {
-        "montage": "~16.0.x",
-        "montage-geo": "montagestudio/montage-geo"
+        "montage": "montagejs/montage#master",
+        "montage-geo": "../../montage-geo"
     },
     "private": true
 }

@@ -4,7 +4,6 @@
     "author": "Montage Studio, inc. (http://montagestudio.com/)",
     "description": "Montage components for building geospatial applications",
     "dependencies": {
-        "collections": "~5.0.x",
         "frb": "~4.0.x",
         "leaflet": "~1.0.x",
         "montage": "montagejs/montage#master",
