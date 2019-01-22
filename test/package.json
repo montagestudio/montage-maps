@@ -14,17 +14,15 @@
         "type": "git",
         "url": "montagestudio/montage-maps-tests"
     },
-    "scripts": {
-        "postinstall": "npm link ./.."
-    },
     "mappings": {
         "montage": "../node_modules/montage",
         "montage-testing": "../node_modules/montage-testing",
-        "montage-maps": "../"
+        "montage-maps": "../",
+        "montage-geo": "../node_modules/montage-geo"
     },
     "dependencies": {
         "montage": "~16.0.x",
-        "montage-geo": "../../montage-geo"
+        "montage-geo": "montagestudio/montage-geo"
     },
     "private": true
 }
