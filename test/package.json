@@ -14,9 +14,6 @@
         "type": "git",
         "url": "montagestudio/montage-maps-tests"
     },
-    "scripts": {
-        "postinstall": "npm link ./.."
-    },
     "mappings": {
         "montage": "../node_modules/montage",
         "montage-testing": "../node_modules/montage-testing",
