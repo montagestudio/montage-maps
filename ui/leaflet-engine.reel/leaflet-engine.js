@@ -185,14 +185,15 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     _normalizedLongitude: {
         value: function (longitude) {
             var currentCenter = this._map.getCenter(),
+                centerLng = currentCenter.lng,
                 latitude = currentCenter.lat,
-                distance = this._distanceBetweenPoints([longitude, latitude], [currentCenter.lng, latitude]),
+                distance = this._distanceBetweenPoints([longitude, latitude], [centerLng, latitude]),
                 i = 0;
             while (distance > 180) {
                 distance -= 360;
                 i++;
             }
-            return longitude + i * (currentCenter > longitude ? 360 : -360);
+            return longitude + i * (centerLng > longitude ? 360 : -360);
         }
     },
 
