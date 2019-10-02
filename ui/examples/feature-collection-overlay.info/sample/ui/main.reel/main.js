@@ -14,6 +14,10 @@ exports.Main = Component.specialize(/** @lends Main.prototype */ {
         value: undefined
     },
 
+    _featureCollection: {
+        value: undefined
+    },
+
     mainService: {
         get: function () {
             if (!this._mainService) {
@@ -37,9 +41,10 @@ exports.Main = Component.specialize(/** @lends Main.prototype */ {
                 selector = DataSelector.withTypeAndCriteria(Country.TYPE);
                 self = this;
                 this.mainService.fetchData(selector).then(function (countries) {
-                    countries.forEach(function (country) {
-                        self._map.addFeature(country);
-                    });
+                    self._featureCollection.add.apply(self._featureCollection, countries);
+                    // countries.forEach(function (country) {
+                    //     self._map.drawFeature(country);
+                    // });
                 });
             }
         }

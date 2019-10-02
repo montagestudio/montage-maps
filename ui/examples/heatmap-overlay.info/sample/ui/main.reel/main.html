@@ -12,25 +12,26 @@
             "properties": {
                 "element": {"#": "main"},
                 "_map": {"@": "map"},
-                "_featureCollection": {"@": "featureCollection"}
+                "_collection": {"@": "collection"}
+            }
+        },
+        "collection": {
+            "prototype": "montage-geo/logic/model/feature-collection"
+        },
+        "heatmapOverlay": {
+            "prototype": "montage-maps/ui/heatmap-overlay.reel",
+            "values": {
+                "element": {"#": "heatmap"},
+                "collection": {"@": "collection"}
             }
         },
         "map": {
             "prototype": "montage-maps/ui/map.reel",
-            "properties": {
-                "element": {"#": "map"},
-                "center": [-156.6825, 20.8783],
-                "zoom": 5
-            }
-        },
-        "featureCollection": {
-            "prototype": "montage-geo/logic/model/feature-collection"
-        },
-        "featureCollectionOverlay": {
-            "prototype": "montage-maps/ui/feature-collection-overlay.reel",
             "values": {
-                "map": {"@": "map"},
-                "collection": {"@": "featureCollection"}
+                "element": {"#": "map"},
+                "center": [121.477, 31.225],
+                "overlays": [{"@": "heatmapOverlay"}],
+                "zoom": 5
             }
         }
     }
@@ -39,7 +40,7 @@
 <body>
     <div data-montage-id="main" class="Main">
         <div data-montage-id="map"></div>
-        <div data-montage-id="featureCollectionOverlay"></div>
+        <div data-montage-id="heatmap"></div>
     </div>
 </body>
 </html>

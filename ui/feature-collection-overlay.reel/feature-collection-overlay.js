@@ -18,7 +18,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             this.addOwnPropertyChangeListener("_isEnabled", this._handleIsEnableDidChange.bind(this));
         }
     },
-    
+
     /***********************************************************************
      * Properties
      */
@@ -51,14 +51,14 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
     map: {
         value: undefined
     },
-    
+
     /**
      * @type {boolean}
      */
     _isEnabled: {
         value: false
     },
-    
+
     _zoom: {
         value: 0
     },
@@ -80,21 +80,22 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             }
         }
     },
-    
+
     _addCollectionListeners: {
         value: function () {
-            this._geometryChangeListener = value.addContentPropertyChangeListener(
+            var collection = this.collection;
+            this._geometryChangeListener = collection.addContentPropertyChangeListener(
                 "geometry", this._handleFeatureGeometryChange.bind(this)
             );
-            this._styleChangeListener = value.addContentPropertyChangeListener(
+            this._styleChangeListener = collection.addContentPropertyChangeListener(
                 "style", this._handleFeatureStyleChange.bind(this)
             );
-            this._featuresRangeChangeListener = value.features.addRangeChangeListener(
+            this._featuresRangeChangeListener = collection.features.addRangeChangeListener(
                 this._handleFeaturesRangeChange.bind(this)
             );
         }
     },
-    
+
     _addMapListeners: {
         value: function () {
             var map;
@@ -108,7 +109,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             }
         }
     },
-    
+
     _cancelMapListeners: {
         value: function () {
             var map;
@@ -176,7 +177,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             }
         }
     },
-    
+
     _handleIsEnableDidChange: {
         value: function (value) {
             if (value) {
@@ -358,7 +359,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             }
         }
     },
-    
+
     // /**
     //  * Sends a command to the map to erase the feature.
     //  * @private
@@ -444,8 +445,8 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
     //         this._drawnFeatures.add(feature);
     //     }
     // },
-    
-    
+
+
     /***********************************************************************
      * Clustering
      */
@@ -465,11 +466,11 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
     // spiderClusters: {
     //     value: false
     // },
-    
+
     _isClustering: {
         value: false
     },
-    
+
     /**
      * Indicates whether the features should be clustered when in close prox-
      * imity to one another.  Default is false.
@@ -501,7 +502,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             // }
         }
     },
-    
+
     /**
      * @private
      * @type {ClusterOrganizer}
@@ -509,7 +510,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
     _clusterManager: {
         value: undefined
     },
-    
+
     /**
      * Adds an array of features to the cluster manager.  The associated clust-
      * ers will be queued up to be drawn on the map during the next draw cycle.
@@ -530,7 +531,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             }
         }
     },
-    
+
     /**
      * Adds a feature to the cluster manager and queues its associated cluster
      * to be drawn or redrawn on the map during the next draw cycle.
@@ -549,7 +550,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             }
         }
     },
-    
+
     /**
      *
      * Returns true if the feature can be clustered.  Only features whose geo-
@@ -566,7 +567,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             return geometry instanceof Point || (geometry instanceof MultiPoint && geometry.coordinates.length === 1);
         }
     },
-    
+
     /**
      * @private
      * @type {ClusterOrganizer}
@@ -574,7 +575,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
     _clusterManager: {
         value: undefined
     },
-    
+
     /**
      *
      * Returns true if the feature can be clustered.  Only features whose geo-
@@ -591,7 +592,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             return geometry instanceof Point || (geometry instanceof MultiPoint && geometry.coordinates.length === 1);
         }
     },
-    
+
     /***********************************************************************
      * Map Tip Management
      */

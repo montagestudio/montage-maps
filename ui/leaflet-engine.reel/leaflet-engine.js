@@ -2,16 +2,20 @@ var Component = require("montage/ui/component").Component,
     BoundingBox = require("montage-geo/logic/model/bounding-box").BoundingBox,
     Enum = require("montage/core/enum").Enum,
     Enumeration = require("montage/data/model/enumeration").Enumeration,
+    L = require("leaflet"),
     LineString = require("montage-geo/logic/model/line-string").LineString,
     Map = require("montage/collections/map").Map,
+    MapPane = require("logic/model/map-pane").MapPane,
     MultiLineString = require("montage-geo/logic/model/multi-line-string").MultiLineString,
     MultiPoint = require("montage-geo/logic/model/multi-point").MultiPoint,
     MultiPolygon = require("montage-geo/logic/model/multi-polygon").MultiPolygon,
-    L = require("leaflet"),
+    Point = require("montage-geo/logic/model/point").Point,
     Point2D = require("montage-geo/logic/model/point-2d").Point2D,
     Polygon = require("montage-geo/logic/model/polygon").Polygon,
-    Point = require("montage-geo/logic/model/point").Point,
+    Position = require("montage-geo/logic/model/position").Position,
+    Promise = require("montage/core/promise").Promise,
     Set = require("montage/collections/set"),
+    Size = require("montage-geo/logic/model/size").Size,
     DEFAULT_ZOOM = 4;
 
 var DRAW_QUEUE_COMMANDS = new Enum().initWithMembers("DRAW", "ERASE", "REDRAW");
@@ -143,6 +147,64 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     },
 
     /**************************************************************************
+     * Coordinate Projection
+     */
+
+    /**
+     * Return's the pixel location of the provided position relative to the
+     * map's origin pixel.
+     *
+     * @param {Position}
+     * @returns {Point2D}
+     */
+    positionToPoint: {
+        value: function (position) {
+            var longitude = this._normalizedLongitude(position.longitude),
+                point = this._map.latLngToLayerPoint([position.latitude, longitude]);
+            return Point2D.withCoordinates(point.x, point.y);
+        }
+    },
+
+    /**
+     * Return's the pixel location of the provided position relative to the
+     * map's container.
+     *
+     * @param {Position}
+     * @returns {Point2D}
+     */
+    positionToContainerPoint: {
+        value: function (position) {
+            var longitude = this._normalizedLongitude(position.longitude),
+                point = this._map.latLngToContainerPoint([position.latitude, longitude]);
+            return Point2D.withCoordinates(point.x, point.y);
+        }
+    },
+
+    // Note: Original version of this function supported passing an array or
+    // a position.  Maybe legacy baggage?  Removing for now.
+    _normalizedLongitude: {
+        value: function (longitude) {
+            var currentCenter = this._map.getCenter(),
+                latitude = currentCenter.lat,
+                distance = this._distanceBetweenPoints([longitude, latitude], [currentCenter.lng, latitude]),
+                i = 0;
+            while (distance > 180) {
+                distance -= 360;
+                i++;
+            }
+            return longitude + i * (currentCenter > longitude ? 360 : -360);
+        }
+    },
+
+    _distanceBetweenPoints: {
+        value: function (point1, point2) {
+            var distanceX = point1[0] - point2[0],
+                distanceY = point1[1] - point2[1];
+            return Math.sqrt((distanceX * distanceX) + (distanceY * distanceY));
+        }
+    },
+
+    /**************************************************************************
      * Add / Remove Features
      */
 
@@ -157,7 +219,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             }
         }
     },
-    
+
     eraseFeature: {
         value: function (feature, processImmediately) {
             if (processImmediately && this._map) {
@@ -168,7 +230,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             }
         }
     },
-    
+
     redrawFeature: {
         value: function (feature, processImmediately) {
             this._prepareFeatureForDrawing(feature);
@@ -194,7 +256,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             }
         }
     },
-    
+
     _eraseFeature: {
         value: function (feature) {
             var self = this;
@@ -223,14 +285,14 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             });
         }
     },
-    
+
     _prepareFeatureForDrawing: {
         value: function (feature) {
             var processedCoordinates = this._processCoordinates(feature.geometry);
             this._processedCoordinates.set(feature, processedCoordinates);
         }
     },
-    
+
     _processCoordinates: {
         value: function (geometry) {
             var symbolId = GEOMETRY_CONSTRUCTOR_TYPE_MAP.get(geometry.constructor),
@@ -238,13 +300,234 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             return symbolizer.project(geometry.coordinates);
         }
     },
-    
+
     _featureQueue: {
         get: function () {
             if (!this.__featureQueue) {
                 this.__featureQueue = new Map();
             }
             return this.__featureQueue;
+        }
+    },
+
+    /**************************************************************************
+     * Panes & Overlay Registration
+     */
+
+    /**
+     * Adds an overlay to the map to the specified pane.
+     * @param {Component} - The overlay to add.
+     * @param {MapPane} -   The pane that the component should be added to.
+     * @returns {Promise} - A promise that will be fulfilled when the overlay
+     *                      is embedded into the map.
+     */
+    addOverlay: {
+        value: function (component) {
+            var overlays = this._overlays.all,
+                self;
+
+            if (overlays.has(component)) {
+                return;
+            }
+
+            self = this;
+            overlays.add(component);
+            return new Promise(function (resolve, reject) {
+                self._queuedOverlays.push({
+                    overlay: component,
+                    action: "add",
+                    resolve: resolve,
+                    reject: reject
+                });
+                self.needsDraw = true;
+            });
+        }
+    },
+
+    /**
+     * Adds an overlay to the map to the specified pane.
+     * @param {Component} - The overlay to add.
+     * @param {MapPane} -   The pane that the component should be added to.
+     * @returns {Promise} - A promise that will be fulfilled when the overlay
+     *                      is embedded into the map.
+     */
+    removeOverlay: {
+        value: function (component) {
+            var overlays = this._overlays.all,
+                self;
+
+            if (!overlays.has(component)) {
+                return;
+            }
+
+            self = this;
+            overlays.delete(component);
+            return new Promise(function (resolve, reject) {
+                self._queuedOverlays.push({
+                    overlay: component,
+                    action: "remove",
+                    resolve: resolve,
+                    reject: reject
+                });
+                self.needsDraw = true;
+            });
+        }
+    },
+
+    /**
+     *
+     * Returns a pane i.e. element to embed an overlay.  Because different
+     * engines have different names for the panes, this method normalizes
+     * the id to be used for the panes.
+     * @public
+     * @override
+     * @param {string}
+     * @returns {Element} the pane
+     */
+    elementForPane: {
+        value: function (pane) {
+            var map, element;
+            if (map = this._map) {
+                switch (pane) {
+                    case MapPane.Drawing:
+                    case MapPane.Overlay:
+                        element = map.getPanes()["overlayPane"];
+                        break;
+                    case MapPane.PopUp:
+                        element = map.getPanes()["popupPane"];
+                        break;
+                    case MapPane.Raster:
+                        element = map.getPanes()["tilePane"];
+                        break;
+                }
+            }
+            return element;
+        }
+    },
+
+    _queuedOverlays: {
+        get: function () {
+            if (!this.__queuedOverlays) {
+                this.__queuedOverlays = [];
+            }
+            return this.__queuedOverlays;
+        }
+    },
+
+    _overlays: {
+        get: function () {
+            if (!this.__overlays) {
+                this.__overlays = Object.create({}, {
+                    all: {
+                        get: function () {
+                            if (!this._all) {
+                                this._all = new Set();
+                            }
+                            return this._all;
+                        }
+                    },
+                    raster: {
+                        get: function () {
+                            if (!this._raster) {
+                                this._raster = new Set();
+                            }
+                            return this._raster;
+                        }
+                    },
+                    drawing: {
+                        get: function () {
+                            if (!this._drawing) {
+                                this._drawing = new Set();
+                            }
+                            return this._drawing;
+                        }
+                    },
+                    overlay: {
+                        get: function () {
+                            if (!this._overlay) {
+                                this._overlay = new Set();
+                            }
+                            return this._overlay;
+                        }
+                    },
+                    popUp: {
+                        get: function () {
+                            if (!this._popUp) {
+                                this._popUp = new Set();
+                            }
+                            return this._popUp;
+                        }
+                    },
+                });
+            }
+            return this.__overlays;
+        }
+    },
+
+    _processOverlayQueue: {
+        value: function () {
+            var queue = this._queuedOverlays,
+                queuedItem;
+            while (queuedItem = queue.shift()) {
+                if (queuedItem.action === "add") {
+                    this._addQueueItemToMap(queuedItem);
+                } else if (queuedItem.action === "remove") {
+                    this._removeQueueItemFromMap(queuedItem);
+                }
+            }
+        }
+    },
+
+    _addQueueItemToMap: {
+        value: function (queuedItem) {
+            var overlays = this._overlays,
+                component = queuedItem.overlay,
+                pane = component.pane || MapPane.Overlay,
+                container = this.elementForPane(pane);
+            container.appendChild(component.element);
+            if (pane === MapPane.Raster || pane == MapPane.Overlay) {
+                this._resizeOverlay(component);
+            }
+            switch (pane) {
+                case MapPane.Raster:
+                    overlays.raster.add(component);
+                    break;
+                case MapPane.Drawing:
+                    overlays.drawing.add(component);
+                    break;
+                case MapPane.Overlay:
+                    overlays.overlay.add(component);
+                    break;
+                case MapPane.PopUp:
+                    overlays.popUp.add(component);
+                    break;
+            }
+            queuedItem.resolve();
+        }
+    },
+
+    _removeQueueItemFromMap: {
+        value: function (queuedItem) {
+            var overlays = this._overlays,
+                component = queuedItem.overlay,
+                pane = component.pane || MapPane.Overlay,
+                container = this.elementForPane(queuedItem.pane);
+            container.removeChild(component.element);
+            switch (pane) {
+                case MapPane.Raster:
+                    overlays.raster.delete(component);
+                    break;
+                case MapPane.Drawing:
+                    overlays.drawing.delete(component);
+                    break;
+                case MapPane.Overlay:
+                    overlays.overlay.delete(component);
+                    break;
+                case MapPane.PopUp:
+                    overlays.popUp.delete(component);
+                    break;
+            }
+            queuedItem.resolve();
         }
     },
 
@@ -276,13 +559,33 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             }
 
             if (this._map) {
+                this._processOverlayQueue();
+            }
+
+            if (this._map) {
                 this._processFeatureQueue();
             }
 
-            if (this._featureQueue.size || this._worldsDidChange) {
+            if (this._featureQueue.size || this._worldsDidChange || this._queuedOverlays.length) {
                 setTimeout(function () {
                     self.needsDraw = true;
                 }, 100);
+            }
+        }
+    },
+
+    willDraw: {
+        value: function () {
+            var size,
+                mapDimensions,
+                mapSize;
+            if (this._map) {
+                size = this.size;
+                mapDimensions = this._map.getSize();
+                mapSize = Size.withHeightAndWidth(mapDimensions.x, mapDimensions.y);
+                if (!size || !size.equals(mapSize)) {
+                    this.size = mapSize;
+                }
             }
         }
     },
@@ -351,7 +654,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                 coordinates = this._processedCoordinates.get(feature),
                 symbols = symbolizer.draw(coordinates, offset),
                 map = this._map;
-            
+
             if (symbolizer.isMultiGeometry) {
                 symbols.forEach(function (symbol) {
                     symbol.addTo(map);
@@ -359,7 +662,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             } else {
                 symbols.addTo(map);
             }
-            
+
             return symbols;
         }
     },
@@ -545,11 +848,11 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         value: function () {
             this._map.addEventListener("viewreset", this._handleViewReset.bind(this));
             this._map.addEventListener("moveend", this._updateCenterAndBounds.bind(this));
-            this._map.addEventListener("move", this._updateWorlds.bind(this));
+            this._map.addEventListener("move", this._handleMapMove.bind(this));
             this._map.addEventListener("resize", this._handleResize.bind(this));
             // this._map.addEventListener("zoomstart", this._handleZoomStart.bind(this));
-            // this._map.addEventListener("zoom", this._handleZoom.bind(this));
-            // this._map.addEventListener("zoomend", this._handleZoomEnd.bind(this));
+            this._map.addEventListener("zoom", this._handleZoom.bind(this));
+            this._map.addEventListener("zoomend", this._handleZoomEnd.bind(this));
             this._map.addEventListener("zoomanim", this._handleZoomAnimation.bind(this));
         }
     },
@@ -581,6 +884,53 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     /*****************************************************
      * Event handlers
      */
+
+    _handleMapMove: {
+        value: function () {
+            this._updateWorlds();
+            this._positionOverlays();
+            this.dispatchEventNamed("didMove", true, false, {center: this._map.getCenter()});
+        }
+    },
+
+    _positionOverlays: {
+        value: function () {
+            var overlays = this._overlays,
+                self = this;
+            this._positionableOverlays.forEach(function (overlayId) {
+                overlays[overlayId].forEach(function (component) {
+                    self._positionOverlay(component);
+                });
+            });
+        }
+    },
+
+    _positionOverlay: {
+        value: function (component) {
+            var map = this._map,
+                size = map.getSize(),
+                width = size.x,
+                height = size.y,
+                pixelCenter = map.latLngToLayerPoint(map.getCenter()),
+                offset = {
+                    left: pixelCenter.x - width / 2,
+                    top: pixelCenter.y - height / 2
+                },
+                element = component.element;
+
+            element.style.transform = "translate3d(" + offset.left + "px, " + offset.top + "px, 0)";
+        }
+    },
+
+    _positionableOverlays: {
+        writable: false,
+        value: ["raster", "drawing", "overlay"]
+    },
+
+    _resizableOverlays: {
+        writable: false,
+        value: ["raster", "overlay"]
+    },
 
     _updateWorlds: {
         value: function () {
@@ -629,6 +979,42 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
     _handleResize: {
         value: function () {
+            this._updateMinZoomLevelIfNecessary();
+            this._resizeOverlays();
+        }
+    },
+
+    _resizeOverlays: {
+        value: function () {
+            var self = this,
+                overlays = this._overlays;
+            this._resizableOverlays.forEach(function (overlayId) {
+                overlays[overlayId].forEach(function (component) {
+                    self._resizeOverlay(component);
+                });
+            })
+        }
+    },
+
+    _resizeOverlay: {
+        value: function (component) {
+            var size = this._map.getSize(),
+                width = size.x,
+                height = size.y,
+                element = component.element,
+                isSVG = element.tagName.toUpperCase() === "SVG";
+            if (isSVG) {
+                element.setAttributeNS(null, "width", width);
+                element.setAttributeNS(null, "height", height);
+            } else {
+                element.setAttribute("width", width + "px");
+                element.setAttribute("height", height + "px");
+            }
+        }
+    },
+
+    _updateMinZoomLevelIfNecessary: {
+        value: function () {
             var map = this._map,
                 size = map.getSize(),
                 minZoom = this._minZoomForDimensions(size.x, size.y);
@@ -655,7 +1041,8 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
     _handleZoom: {
         value: function (event) {
-            // console.log("Handle zoom (", event, ") current zoom (", this._map.getZoom(), ")");
+            console.log("Handle zoom (", event, ") current zoom (", this._map.getZoom(), ")");
+            this.dispatchEventNamed("zoom", true, false, {zoom: this._map.getZoom()});
         }
     },
 
@@ -674,6 +1061,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     _handleZoomEnd: {
         value: function (event) {
             console.log("Handle zoom end (", event, ") current zoom (", this._map.getZoom(), ")");
+            this.dispatchEventNamed("didZoom", true, false, {zoom: this._map.getZoom()});
         }
     },
 
@@ -869,7 +1257,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 });
 
 var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
-    
+
     id: {
         value: undefined
     },
@@ -879,17 +1267,17 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
             return null;
         }
     },
-    
+
     project: {
         value: function (coordinates) {
-        
+
         }
     },
-    
+
     isMultiGeometry: {
         value: false
     },
-    
+
     _addLongitudeOffsetToPath: {
         value: function (path, offset) {
             return path.map(function (coordinates) {
@@ -901,19 +1289,19 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
             });
         }
     },
-    
+
     _adjustPathForAntiMeridian: {
         value: function (path) {
-            
+
             var shift = 0,
                 previousCoordinate;
-            
+
             return path.map(function (coordinate) {
-                
+
                 var longitude = coordinate.longitude,
                     previousLongitude,
                     bearing;
-                
+
                 if (previousCoordinate) {
                     previousLongitude = previousCoordinate.longitude;
                     bearing = previousCoordinate.bearing(coordinate);
@@ -926,20 +1314,20 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
                         shift -= 1;
                     }
                 }
-                
+
                 previousCoordinate = coordinate;
                 return [coordinate.latitude, longitude + shift * 360];
-                
+
             });
         }
     },
-    
+
     _processPoint: {
         value: function (coordinates) {
             return [coordinates.latitude, coordinates.longitude];
         }
     }
-    
+
 }, {
 
     POINT: ["Point", {
@@ -959,9 +1347,9 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
                 return [coordinates.latitude, coordinates.longitude];
             }
         }
-    
+
     }],
-    
+
     MULTI_POINT: ["MultiPoint", {
 
         draw: {
@@ -975,11 +1363,11 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
                 });
             }
         },
-        
+
         isMultiGeometry: {
             value: true
         },
-    
+
         project: {
             value: function (coordinates) {
                 return coordinates.map(this._processPoint);
@@ -995,7 +1383,7 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
                 return L.polyline(this._addLongitudeOffsetToPath(coordinates, offset));
             }
         },
-    
+
         project: {
             value: function (coordinates) {
                 return this._adjustPathForAntiMeridian(coordinates);
@@ -1003,7 +1391,7 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
         }
 
     }],
-    
+
     MULTI_LINE_STRING: ["MultiLineString", {
 
         draw: {
@@ -1014,11 +1402,11 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
                 });
             }
         },
-    
+
         isMultiGeometry: {
             value: true
         },
-    
+
         project: {
             value: function (multiLineString) {
                 return multiLineString.map(function (lineString) {
@@ -1026,9 +1414,9 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
                 });
             }
         }
-    
+
     }],
-    
+
     POLYGON: ["Polygon", {
 
         draw: {
@@ -1040,7 +1428,7 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
                 return L.polygon(rings);
             }
         },
-    
+
         project: {
             value: function (rings) {
                 var fn = this._adjustPathForAntiMeridian;
@@ -1051,9 +1439,9 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
         }
 
     }],
-    
+
     MULTI_POLYGON: ["MultiPolygon", {
-    
+
         draw: {
             value: function (polygons, offset) {
                 var fn = this._addLongitudeOffsetToPath;
@@ -1065,11 +1453,11 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
                 });
             }
         },
-    
+
         isMultiGeometry: {
             value: true
         },
-    
+
         project: {
             value: function (polygons) {
                 return polygons.map(function (polygon) {
@@ -1079,6 +1467,6 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
         }
 
     }]
-    
+
 });
 

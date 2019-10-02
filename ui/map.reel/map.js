@@ -1,7 +1,8 @@
 var Component = require("montage/ui/component").Component,
     BoundingBox = require("montage-geo/logic/model/bounding-box").BoundingBox,
     LeafletEngine = require("ui/leaflet-engine.reel").LeafletEngine,
-    Point = require("montage-geo/logic/model/point").Point;
+    Point = require("montage-geo/logic/model/point").Point,
+    Promise = require("montage/core/promise").Promise;
 
 var MAX_BOUNDS = BoundingBox.withCoordinates(
     -Infinity, -85.05112878, Infinity, 85.05112878
@@ -12,6 +13,12 @@ var MAX_BOUNDS = BoundingBox.withCoordinates(
  * @extends Component
  */
 exports.Map = Component.specialize(/** @lends Map# */ {
+
+    constructor: {
+        value: function Map() {
+            this.addRangeAtPathChangeListener("overlays", this);
+        }
+    },
 
     /**************************************************************************
      * Properties
@@ -61,6 +68,17 @@ exports.Map = Component.specialize(/** @lends Map# */ {
                 this._maxBounds = value;
             }
         }
+    },
+
+    overlays: {
+        value: undefined
+    },
+
+    /**
+     * @type {Size}
+     */
+    size: {
+        value: undefined
     },
 
     zoom: {
@@ -113,14 +131,29 @@ exports.Map = Component.specialize(/** @lends Map# */ {
             this._defineEngineBindings(engine);
             this._drawAllFeatures(engine);
             this._addEngineEventListeners(engine);
+            this._addOverlaysToEngine(engine);
         }
     },
-    
+
+    _addOverlaysToEngine: {
+        value: function () {
+            var self = this,
+                overlays = this.overlays || [];
+            return Promise.all(overlays.map(function (overlay) {
+                return self.addOverlay(overlay).then(function () {
+                    overlay.map = self;
+                    return null;
+                });
+            }))
+        }
+    },
+
     _defineEngineBindings: {
         value: function (engine) {
             this.defineBindings({
                 "bounds": {"<-": "bounds", source: engine},
                 "center": {"<->": "center", source: engine},
+                "size": {"<->": "size", source: engine},
                 "zoom": {"<->": "zoom", source: engine}
             });
         }
@@ -156,6 +189,8 @@ exports.Map = Component.specialize(/** @lends Map# */ {
 
     _removeEngineEventListeners: {
         value: function (engine) {
+            engine.removeEventListener("didMove", this);
+            engine.removeEventListener("zoom", this);
             engine.removeEventListener("didZoom", this);
             engine.removeEventListener("willZoom", this);
             engine.removeEventListener("featureMouseout", this);
@@ -171,7 +206,8 @@ exports.Map = Component.specialize(/** @lends Map# */ {
 
     _addEngineEventListeners: {
         value: function (engine) {
-            engine.addEventListener("didZoom", this);
+            engine.addEventListener("didMove", this);
+            engine.addEventListener("zoom", this);
             engine.addEventListener("willZoom", this);
             engine.addEventListener("featureMouseout", this);
             engine.addEventListener("featureMouseover", this);
@@ -183,10 +219,45 @@ exports.Map = Component.specialize(/** @lends Map# */ {
      * Event Handlers
      */
 
+    handleRangeChange: {
+        value: function (plus, minus) {
+            var engine, self;
+            if (engine = this._engine) {
+                self = this;
+                plus.forEach(function (overlay) {
+                    engine.addOverlay(overlay).then(function () {
+                        overlay.map = self;
+                        return null;
+                    });
+                });
+                minus.forEach(function (overlay) {
+                    engine.removeOverlay(overlay).then(function () {
+                        overlay.map = null;
+                        return null;
+                    });
+                });
+            }
+        }
+    },
+
+    handleDidMove: {
+        value: function (event) {
+            event.stopPropagation();
+            this.dispatchEventNamed("didMove", true, true, event.detail);
+        }
+    },
+
     handleDidZoom: {
         value: function (event) {
             event.stopPropagation();
             this.dispatchEventNamed("didZoom", true, true, event.detail);
+        }
+    },
+
+    handleZoom: {
+        value: function (event) {
+            event.stopPropagation();
+            this.dispatchEventNamed("zoom", true, true, event.detail);
         }
     },
 
@@ -221,6 +292,61 @@ exports.Map = Component.specialize(/** @lends Map# */ {
     /**************************************************************************
      * API
      */
+
+    /**
+     * Adds an overlay to the map to the specified pane.
+     * @param {Component} - the overlay to add.
+     * @param {MapPane} - The pane that the component should be added to.
+     * @returns {Promise} - A promise that will be fulfilled when the overlay
+     *                      is embedded into the map.
+     */
+    addOverlay: {
+        value: function (overlay) {
+            this.overlays.push(overlay);
+        }
+    },
+
+    /**
+     * Adds an overlay to the map to the specified pane.
+     * @param {Component} - the overlay to add.
+     * @param {MapPane} - The pane that the component should be added to.
+     * @returns {Promise} - A promise that will be fulfilled when the overlay
+     *                      is embedded into the map.
+     */
+    removeOverlay: {
+        value: function (overlay, pane) {
+            var index = this.overlays.indexOf(overlay);
+            if (index !== -1) {
+                this.overlays.splice(index, 1);
+            }
+        }
+    },
+
+    /**
+     * Return's the pixel location of the provided position relative to the
+     * map's origin pixel.
+     *
+     * @param {Position}
+     * @returns {Point2D}
+     */
+    positionToPoint: {
+        value: function (position) {
+            return this._engine && this._engine.positionToPoint(position);
+        }
+    },
+
+    /**
+     * Return's the pixel location of the provided position relative to the
+     * map's container.
+     *
+     * @param {Position}
+     * @returns {Point2D}
+     */
+    positionToContainerPoint: {
+        value: function (position) {
+            return this._engine && this._engine.positionToContainerPoint(position);
+        }
+    },
 
     /**
      * Adds a feature to the map.
@@ -330,3 +456,5 @@ exports.Map = Component.specialize(/** @lends Map# */ {
     }
 
 });
+
+
