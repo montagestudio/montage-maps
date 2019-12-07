@@ -2,6 +2,7 @@ var Component = require("montage/ui/component").Component,
     FeatureCluster = require("logic/model/feature-cluster").FeatureCluster,
     ClusterOrganizer = require("logic/model/cluster-organizer").ClusterOrganizer,
     Map = require("montage/collections/map"),
+    MapPane = require("logic/model/map-pane").MapPane,
     MultiPoint = require("montage-geo/logic/model/multi-point").MultiPoint,
     Point = require("montage-geo/logic/model/point").Point,
     Set = require("montage/collections/set");
@@ -50,6 +51,11 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
      */
     map: {
         value: undefined
+    },
+
+    pane: {
+        writable: false,
+        value: MapPane.None
     },
 
     /**

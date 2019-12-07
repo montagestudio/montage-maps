@@ -2,7 +2,8 @@ var HttpService = require("montage-data/logic/service/http-service").HttpService
     Country = require("../model/country").Country,
     Feature = require("montage-geo/logic/model/feature").Feature,
     DataSelector = require("montage-data/logic/service/data-selector").DataSelector,
-    DataStream = require("montage-data/logic/service/data-stream").DataStream;
+    DataStream = require("montage-data/logic/service/data-stream").DataStream,
+    Style = require("montage-geo/logic/model/style").Style;
 
 /**
  * Provide data about countries.
@@ -59,16 +60,29 @@ exports.CountryService = HttpService.specialize(/* @lends CountryService */ {
         value: undefined
     },
 
+    _randomColor: {
+        value: function () {
+            var letters = '0123456789ABCDEF',
+                color = '#';
+            for (var i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+    },
+
     /***************************************************************************
      * Mapping data
      */
 
     mapFromRawData: {
         value: function (country, data) {
-            var feature = Feature.withGeoJSON(data);
+            var feature = Feature.withGeoJSON(data),
+                color = this._randomColor();
             country.geometry = feature.geometry;
             country.name = data.properties.name;
             country.id = data.id;
+            country.style = Style.withValues(color, 0.5, color, 1.0, 2.0);
         }
     }
 

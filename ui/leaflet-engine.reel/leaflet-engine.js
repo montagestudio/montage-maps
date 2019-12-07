@@ -33,9 +33,19 @@ GEOMETRY_CONSTRUCTOR_TYPE_MAP.set(Polygon, "Polygon");
  */
 exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
+    constructor: {
+        value: function LeafletEngine() {
+            this.addOwnPropertyChangeListener("baseMap", this);
+        }
+    },
+
     /**************************************************************************
      * Properties
      */
+
+    baseMap: {
+        value: undefined
+    },
 
     /**
      * The current bounds of the map.
@@ -51,10 +61,15 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             return this._bounds;
         },
         set: function (value) {
+            var xMax;
             if (this._map) {
+                xMax = value.xMax;
+                if (xMax < value.xMin) {
+                    xMax += 360;
+                }
                 this._map.fitBounds([
-                    [value.xMin, value.yMin],
-                    [value.xMax, value.yMax]
+                    [value.yMin, value.xMin],
+                    [value.yMax, value.xMax]
                 ]);
             }
         }
@@ -93,6 +108,10 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         value: undefined
     },
 
+    mode: {
+        value: undefined
+    },
+
     /**
      * The current pixel origin of the map.  Overlays may need to adjust their
      * position based upon the pixel origin.
@@ -128,6 +147,15 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             } else if (zoomChanged) {
                 this._zoom = value;
             }
+        }
+    },
+
+    _leafletLayers: {
+        get: function () {
+            if (!this.__leafletLayers) {
+                this.__leafletLayers = new Map();
+            }
+            return this.__leafletLayers;
         }
     },
 
@@ -484,8 +512,11 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             var overlays = this._overlays,
                 component = queuedItem.overlay,
                 pane = component.pane || MapPane.Overlay,
-                container = this.elementForPane(pane);
-            container.appendChild(component.element);
+                container = this.elementForPane(pane),
+                element = component.element;
+            if (element) {
+                container.appendChild(component.element);
+            }
             if (pane === MapPane.Raster || pane == MapPane.Overlay) {
                 this._resizeOverlay(component);
             }
@@ -529,6 +560,131 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                     break;
             }
             queuedItem.resolve();
+        }
+    },
+
+    /**************************************************************************
+     * Feature Events
+     */
+
+    _onSymbolClick: {
+        value: function (event) {
+            var coordinate = exports.LeafletEngine.Position.withCoordinates(event.latlng.lng, event.latlng.lat),
+                feature = this._symbolFeatureMap.get(event.target);
+            if (feature) {
+                this._handleFeatureClick(feature, coordinate);
+            }
+        }
+    },
+
+    _onSymbolMouseover: {
+        value: function (event) {
+            var coordinate = exports.LeafletEngine.Position.withCoordinates(event.latlng.lng, event.latlng.lat),
+                feature = this._symbolFeatureMap.get(event.target);
+
+            if (feature) {
+                this._handleFeatureMouseover(feature, coordinate);
+            }
+        }
+    },
+
+    _onSymbolMouseout: {
+        value: function (event) {
+            var coordinate = exports.LeafletEngine.Position.withCoordinates(event.latlng.lng, event.latlng.lat),
+                feature = this._symbolFeatureMap.get(event.target);
+
+            if (feature) {
+                this._handleFeatureMouseout(feature, coordinate);
+            }
+        }
+    },
+
+    _handleFeatureClick: {
+        value: function (feature, coordinate) {
+            var isHidden = this._isCoordinateHidden(coordinate);
+            if (this._inPanMode && !isHidden) {
+                this.dispatchEventNamed("featureSelection", true, true, {
+                    coordinate: coordinate,
+                    feature: feature
+                });
+            }
+        }
+    },
+
+    _handleFeatureMouseover: {
+        value: function (feature, coordinate) {
+            var isHidden = this._isCoordinateHidden(coordinate),
+                timer = this._mousedOverFeatureEvents.get(feature),
+                mouseOutTimer = this._mousedOutFeatureEvents.get(feature),
+                self = this;
+
+            if (mouseOutTimer) {
+                this._mousedOutFeatureEvents.delete(feature);
+                clearTimeout(mouseOutTimer);
+            }
+            if (this._inPanMode && !timer && !isHidden) {
+                timer = setTimeout(function () {
+                    self.dispatchEventNamed("featureMouseover", true, true, {
+                        coordinate: coordinate,
+                        feature: feature
+                    });
+                    self._mousedOverFeatureEvents.delete(feature);
+                }, 250);
+                this._mousedOverFeatureEvents.set(feature, timer);
+            }
+        }
+    },
+
+    _handleFeatureMouseout: {
+        value: function (feature, coordinate) {
+            var mousedOverTimer = this._mousedOverFeatureEvents.get(feature),
+                mouseOutTimer,
+                self;
+            if (mousedOverTimer) {
+                this._mousedOverFeatureEvents.delete(feature);
+                clearTimeout(mousedOverTimer);
+            }
+            self = this;
+            mouseOutTimer = setTimeout(function () {
+                self.dispatchEventNamed("featureMouseout", true, true, {
+                    coordinate: coordinate,
+                    feature: feature
+                });
+                self._mousedOutFeatureEvents.delete(feature);
+            }, 250);
+            this._mousedOutFeatureEvents.set(feature, mouseOutTimer);
+        }
+    },
+
+    _mousedOverFeatureEvents: {
+        get: function () {
+            if (!this.__mousedOverFeatureEvents) {
+                this.__mousedOverFeatureEvents = new Map();
+            }
+            return this.__mousedOverFeatureEvents;
+        }
+    },
+
+    _mousedOutFeatureEvents: {
+        get: function () {
+            if (!this.__mousedOutFeatureEvents) {
+                this.__mousedOutFeatureEvents = new Map();
+            }
+            return this.__mousedOutFeatureEvents;
+        }
+    },
+
+    _inPanMode: {
+        get: function () {
+            return true;
+            // return this.mapComponent.currentMode === Mode["Pan"];
+        }
+    },
+
+    _isCoordinateHidden: {
+        value: function (coordinate) {
+            return false;
+            // return this._isHiddenBehindMapTip(coordinate) || this._isHiddenBehindFigure(coordinate);
         }
     },
 
@@ -653,15 +809,24 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                 symbolId = GEOMETRY_CONSTRUCTOR_TYPE_MAP.get(geometry.constructor),
                 symbolizer = Symbolizer.forId(symbolId),
                 coordinates = this._processedCoordinates.get(feature),
-                symbols = symbolizer.draw(coordinates, offset),
+                symbols = symbolizer.draw(coordinates, offset, feature.style),
+                symbolFeatureMap = this._symbolFeatureMap,
                 map = this._map;
 
             if (symbolizer.isMultiGeometry) {
                 symbols.forEach(function (symbol) {
                     symbol.addTo(map);
-                })
+                    symbolFeatureMap.set(symbol, feature);
+                    symbol.on("click", this._onSymbolClick.bind(this));
+                    symbol.on("mouseout", this._onSymbolMouseout.bind(this));
+                    symbol.on("mouseover", this._onSymbolMouseover.bind(this));
+                }, this);
             } else {
                 symbols.addTo(map);
+                symbolFeatureMap.set(symbols, feature);
+                symbols.on("click", this._onSymbolClick.bind(this));
+                symbols.on("mouseout", this._onSymbolMouseout.bind(this));
+                symbols.on("mouseover", this._onSymbolMouseover.bind(this));
             }
 
             return symbols;
@@ -679,13 +844,16 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
     _removeSymbol: {
         value: function (symbols) {
-            var map = this._map;
+            var map = this._map,
+                symbolFeatureMap = this._symbolFeatureMap;
             if (Array.isArray(symbols)) {
                 symbols.forEach(function (symbol) {
                     map.removeLayer(symbol);
+                    symbolFeatureMap.delete(symbol);
                 });
             } else {
                 map.removeLayer(symbols);
+                symbolFeatureMap.delete(symbols);
             }
         }
     },
@@ -770,6 +938,15 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         }
     },
 
+    _symbolFeatureMap: {
+        get: function () {
+            if (!this.__symbolFeatureMap) {
+                this.__symbolFeatureMap = new Map();
+            }
+            return this.__symbolFeatureMap;
+        }
+    },
+
     /*****************************************************
      * Component Delegate methods
      */
@@ -832,8 +1009,9 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         value: function () {
             var map = this._map;
             if (map) {
-                L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {
-                    attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
+                new L.BingLayer("", {
+                    minZoom: 0,
+                    maxZoom: 18
                 }).addTo(map);
             }
         }
@@ -885,6 +1063,12 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     /*****************************************************
      * Event handlers
      */
+
+    handleBaseMapChange: {
+        value: function (value) {
+
+        }
+    },
 
     _handleMapMove: {
         value: function () {
@@ -1037,12 +1221,12 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                 origin = map.project(point, zoom).round();
 
             this.pixelOrigin = Point2D.withCoordinates(origin.x, origin.y);
+            this.needsDraw = true;
         }
     },
 
     _handleZoom: {
         value: function (event) {
-            console.log("Handle zoom (", event, ") current zoom (", this._map.getZoom(), ")");
             this.dispatchEventNamed("zoom", true, false, {zoom: this._map.getZoom()});
         }
     },
@@ -1061,7 +1245,6 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
     _handleZoomEnd: {
         value: function (event) {
-            console.log("Handle zoom end (", event, ") current zoom (", this._map.getZoom(), ")");
             this.dispatchEventNamed("didZoom", true, false, {zoom: this._map.getZoom()});
         }
     },
@@ -1204,6 +1387,42 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     },
 
     /*****************************************************
+     * Background Layers
+     */
+
+    // TODO: Implment
+    // _backgroundOverlayWithLayer: {
+    //     value: function (layer) {
+    //         if (!this._leafletLayers.has(layer)) {
+    //             this._leafletLayers.set(layer, this._createBackgroundOverlayWithLayer(layer));
+    //         }
+    //         return this._leafletLayers.get(layer);
+    //     }
+    // },
+    //
+    // _createBackgroundOverlayWithLayer: {
+    //     value: function (layer) {
+    //         var self = this,
+    //             service = this.application.delegate.service;
+    //         return new L.TileLayer.Functional(function (view) {
+    //             var tile = self._baseMapTileWithId([view.tile.column, view.tile.row, view.zoom].join(":")),
+    //                 expression = "$tile == tile && $layer == layer",
+    //                 criteria = new Criteria().initWithExpression(expression, {
+    //                     tile: tile,
+    //                     layer: layer
+    //                 }),
+    //                 query = DataQuery.withTypeAndCriteria(Tile, criteria);
+    //
+    //             return service.fetchData(query);
+    //             // return BackgroundTileService.fetchTileImage(layer, tile);
+    //         }, {
+    //             minZoom: layer && layer.minZoom !== undefined ? layer.minZoom : 0,
+    //             maxZoom: layer && layer.maxZoom !== undefined ? layer.maxZoom : 18
+    //         });
+    //     }
+    // },
+
+    /*****************************************************
      * Logging
      */
 
@@ -1323,6 +1542,45 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
         }
     },
 
+    _convertStyle: {
+        value: function (style) {
+            var convertedStyle = {},
+                options = {},
+                icon, size;
+            if (icon = style.icon) {
+                options["iconUrl"] = icon.symbol;
+                if ((size = icon.scaledSize) || (size = icon.size)) {
+                    options["iconSize"] = [size.width, size.height];
+                }
+                if (icon.anchor) {
+                    options["iconAnchor"] = [icon.anchor.x, icon.anchor.y];
+                }
+                convertedStyle["icon"] = L.icon(options);
+            } else {
+                if (style.fillColor) {
+                    convertedStyle["fillColor"] = style.fillColor;
+                }
+                if (style.fillOpacity) {
+                    convertedStyle["fillOpacity"] = style.fillOpacity;
+                }
+                if (style.strokeColor) {
+                    convertedStyle["color"] = style.strokeColor;
+                }
+                if (style.strokeOpacity) {
+                    convertedStyle["opacity"] = style.strokeOpacity;
+                }
+                if (style.strokeWeight) {
+                    convertedStyle["stroke"] = true;
+                    convertedStyle["weight"] = style.strokeWeight;
+                } else {
+                    convertedStyle["stroke"] = false;
+                }
+            }
+
+            return convertedStyle;
+        }
+    },
+
     _processPoint: {
         value: function (coordinates) {
             return [coordinates.latitude, coordinates.longitude];
@@ -1334,12 +1592,19 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
     POINT: ["Point", {
 
         draw: {
-            value: function (coordinates, offset) {
-                var longitude = coordinates[1];
+            value: function (coordinates, offset, style) {
+                var longitude = coordinates[1],
+                    convertedStyle,
+                    options;
+                if (style && (convertedStyle = this._convertStyle(style).icon)) {
+                    options = {
+                        icon: convertedStyle
+                    };
+                }
                 if (offset !== 0) {
                     longitude += offset;
                 }
-                return L.marker([coordinates[0], longitude]);
+                return L.marker([coordinates[0], longitude], options);
             }
         },
 
@@ -1354,13 +1619,20 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
     MULTI_POINT: ["MultiPoint", {
 
         draw: {
-            value: function (coordinates, offset) {
+            value: function (coordinates, offset, style) {
+                var convertedStyle,
+                    options;
+                if (style && (convertedStyle = this._convertStyle(style).icon)) {
+                    options = {
+                        icon: convertedStyle
+                    };
+                }
                 return coordinates.map(function (coordinate) {
                     var longitude = coordinate[1];
                     if (offset !== 0) {
                         longitude += offset;
                     }
-                    return L.marker([coordinates[0], longitude]);
+                    return L.marker([coordinates[0], longitude], options);
                 });
             }
         },
@@ -1380,8 +1652,9 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
     LINE_STRING: ["LineString", {
 
         draw: {
-            value: function (coordinates, offset) {
-                return L.polyline(this._addLongitudeOffsetToPath(coordinates, offset));
+            value: function (coordinates, offset, style) {
+                var convertedStyle = style && this._convertStyle(style);
+                return L.polyline(this._addLongitudeOffsetToPath(coordinates, offset), convertedStyle);
             }
         },
 
@@ -1396,10 +1669,11 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
     MULTI_LINE_STRING: ["MultiLineString", {
 
         draw: {
-            value: function (coordinates, offset) {
-                var fn = this._addLongitudeOffsetToPath;
+            value: function (coordinates, offset, style) {
+                var fn = this._addLongitudeOffsetToPath,
+                    convertedStyle = style && this._convertStyle(style);
                 return coordinates.map(function (path) {
-                    return L.polyline(fn(path, offset));
+                    return L.polyline(fn(path, offset), convertedStyle);
                 });
             }
         },
@@ -1421,12 +1695,13 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
     POLYGON: ["Polygon", {
 
         draw: {
-            value: function (coordinates, offset) {
+            value: function (coordinates, offset, style) {
                 var fn = this._addLongitudeOffsetToPath,
+                    convertedStyle = style && this._convertStyle(style),
                     rings = coordinates.map(function (ring) {
                         return fn(ring, offset);
                     });
-                return L.polygon(rings);
+                return L.polygon(rings, convertedStyle);
             }
         },
 
@@ -1444,13 +1719,14 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
     MULTI_POLYGON: ["MultiPolygon", {
 
         draw: {
-            value: function (polygons, offset) {
-                var fn = this._addLongitudeOffsetToPath;
+            value: function (polygons, offset, style) {
+                var fn = this._addLongitudeOffsetToPath,
+                    convertedStyle = style && this._convertStyle(style);
                 return polygons.map(function (polygon) {
                     var coordinates = polygon.map(function (path) {
                         return fn(path, offset);
                     });
-                    return L.polygon(coordinates);
+                    return L.polygon(coordinates, convertedStyle);
                 });
             }
         },
@@ -1471,3 +1747,153 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
 
 });
 
+/*
+     https://github.com/ismyrnow/Leaflet.functionaltilelayer
+     Copyright 2013 Ishmael Smyrnow
+
+     Permission is hereby granted, free of charge, to any person obtaining
+     a copy of this software and associated documentation files (the
+     "Software"), to deal in the Software without restriction, including
+     without limitation the rights to use, copy, modify, merge, publish,
+     distribute, sublicense, and/or sell copies of the Software, and to
+     permit persons to whom the Software is furnished to do so, subject to
+     the following conditions:
+
+     The above copyright notice and this permission notice shall be
+     included in all copies or substantial portions of the Software.
+
+     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+     MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+     LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+     OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+     WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+*/
+L.TileLayer.Functional = L.TileLayer.extend({
+
+    _tileFunction: null,
+
+    initialize: function (tileFunction, options) {
+        this._tileFunction = tileFunction;
+        L.TileLayer.prototype.initialize.call(this, null, options);
+    },
+
+    getTileUrl: function (tilePoint) {
+        var map = this._map,
+            crs = map.options.crs,
+            tileSize = this.options.tileSize,
+            zoom = tilePoint.z,
+            nwPoint = tilePoint.multiplyBy(tileSize),
+            sePoint = nwPoint.add(new L.Point(tileSize, tileSize)),
+            nw = crs.project(map.unproject(nwPoint, zoom)),
+            se = crs.project(map.unproject(sePoint, zoom)),
+            bbox = [nw.x, se.y, se.x, nw.y].join(',');
+
+        // Setup object to send to tile function.
+        var view = {
+            bbox: bbox,
+            width: tileSize,
+            height: tileSize,
+            zoom: zoom,
+            tile: {
+                row: this.options.tms ? this._tileNumBounds.max.y - tilePoint.y : tilePoint.y,
+                column: tilePoint.x
+            },
+            subdomain: this._getSubdomain(tilePoint)
+        };
+
+        return this._tileFunction(view).then(function (tiles) {
+            var tile = tiles.length > 0 && tiles[0],
+                url = tile ? tile.dataUrl || tile.image.src : BackgroundTile.transparentImage;
+            // TODO figure out how it is possible an image is returned as undefined
+            if (url.endsWith("undefined") || !url) {
+                url = BackgroundTile.transparentImage;
+            }
+            return url;
+        });
+    },
+
+    // @method createTile(coords: Object, done?: Function): HTMLElement
+    // Called only internally, overrides GridLayer's [`createTile()`](#gridlayer-createtile)
+    // to return an `<img>` HTML element with the appropriate image URL given `coords`. The `done`
+    // callback is called when the tile has been loaded.
+    createTile: function (coords, done) {
+        var tile = document.createElement('img');
+
+        L.DomEvent.on(tile, 'load', L.bind(this._tileOnLoad, this, done, tile));
+        L.DomEvent.on(tile, 'error', L.bind(this._tileOnError, this, done, tile));
+
+        if (this.options.crossOrigin) {
+            tile.crossOrigin = '';
+        }
+
+        /*
+         Alt tag is set to empty string to keep screen readers from reading URL and for compliance reasons
+         http://www.w3.org/TR/WCAG20-TECHS/H67
+        */
+        tile.alt = '';
+
+        /*
+         Set role="presentation" to force screen readers to ignore this
+         https://www.w3.org/TR/wai-aria/roles#textalternativecomputation
+        */
+        tile.setAttribute('role', 'presentation');
+
+        this.getTileUrl(coords).then(function (url) {
+            tile.src = url;
+        });
+
+        return tile;
+    }
+
+});
+
+L.tileLayer.functional = function (tileFunction, options) {
+    return new L.TileLayer.Functional(tileFunction, options);
+};
+
+L.BingLayer = L.TileLayer.extend({
+
+    initialize: function (tileFunction, options) {
+        this._tileFunction = tileFunction;
+        L.TileLayer.prototype.initialize.call(this, null, options);
+    },
+
+    getTileUrl: function (coords) {
+        var x = coords.x,
+            y = coords.y,
+            s = this._getSubdomain(x, y),
+            z = this._getZoomForUrl(),
+            url = "https://t";
+        url += this._getSubdomain(x, y);
+        url += ".ssl.ak.dynamic.tiles.virtualearth.net/comp/ch/";
+        url += this._quadKey(x, y, z);
+        url += "?mkt=en-en&it=A,G,L";
+        return url;
+    },
+
+    _getSubdomain: function (x, y) {
+        return Math.abs(x + y) % 4;
+    },
+
+    _quadKey: function (x, y, z) {
+        var quadKey = "",
+            digit, mask, i;
+        for (i = z; i > 0; i--) {
+            digit = 0;
+            mask = 1 << (i - 1);
+            if ((x & mask) != 0) {
+                digit++;
+            }
+            if ((y & mask) != 0) {
+                digit++;
+                digit++;
+            }
+            quadKey += String(digit);
+        }
+        return quadKey;
+    }
+
+});

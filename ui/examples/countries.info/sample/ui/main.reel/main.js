@@ -2,7 +2,8 @@ var Component = require("montage/ui/component").Component,
     Country = require("../../logic/model/country").Country,
     CountryService = require("../../logic/service/country-service").CountryService,
     DataSelector = require("montage-data/logic/service/data-selector").DataSelector,
-    DataService = require("montage-data/logic/service/data-service").DataService;
+    DataService = require("montage-data/logic/service/data-service").DataService,
+    Set = require("montage/collections/set");
 
 /**
  * @class Main
@@ -12,6 +13,15 @@ exports.Main = Component.specialize(/** @lends Main.prototype */ {
 
     _map: {
         value: undefined
+    },
+
+    _selectedCountries: {
+        get: function () {
+            if (!this.__selectedCountries) {
+                this.__selectedCountries = new Set();
+            }
+            return this.__selectedCountries;
+        }
     },
 
     mainService: {
@@ -42,6 +52,40 @@ exports.Main = Component.specialize(/** @lends Main.prototype */ {
                     });
                 });
             }
+        }
+    },
+
+    handleFeatureMouseover: {
+        value: function (event) {
+            var country = event.detail.feature;
+            if (country) {
+                country.style.strokeColor = "#FF0000";
+                this._map.redrawFeature(country, true);
+            }
+        }
+    },
+
+    handleFeatureMouseout: {
+        value: function (event) {
+            var country = event.detail.feature;
+            if (country) {
+                country.style.strokeColor = country.style.fillColor;
+                this._map.redrawFeature(country, true);
+            }
+        }
+    },
+
+    handleFeatureSelection: {
+        value: function (event) {
+            var country = event.detail.feature;
+            if (this._selectedCountries.has(country)) {
+                country.style.fillOpacity = 0.5;
+                this._selectedCountries.delete(country);
+            } else {
+                country.style.fillOpacity = 1.0;
+                this._selectedCountries.add(country);
+            }
+            this._map.redrawFeature(country, true);
         }
     }
 

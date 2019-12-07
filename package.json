@@ -5,9 +5,9 @@
     "description": "Montage components for building geospatial applications",
     "dependencies": {
         "frb": "~4.0.x",
-        "leaflet": "~1.0.x",
+        "leaflet": "~1.6.x",
         "montage": "montagejs/montage#master",
-        "montage-geo": "montagestudio/montage-geo"
+        "montage-geo": "montagestudio/montage-geo.git#master"
     },
     "devDependencies": {
         "concurrently": "^3.4.0",

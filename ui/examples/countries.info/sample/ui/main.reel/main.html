@@ -20,7 +20,21 @@
                 "element": {"#": "map"},
                 "center": [-156.6825, 20.8783],
                 "zoom": 5
-            }
+            },
+            "listeners": [
+                {
+                    "type": "featureMouseout",
+                    "listener": {"@": "owner"}
+                },
+                {
+                    "type": "featureMouseover",
+                    "listener": {"@": "owner"}
+                },
+                {
+                    "type": "featureSelection",
+                    "listener": {"@": "owner"}
+                }
+            ]
         }
     }
     </script>

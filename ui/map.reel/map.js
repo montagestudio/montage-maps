@@ -71,7 +71,15 @@ exports.Map = Component.specialize(/** @lends Map# */ {
     },
 
     overlays: {
-        value: undefined
+        get: function () {
+            if (!this._overlays) {
+                this._overlays = [];
+            }
+            return this._overlays;
+        },
+        set: function (value) {
+            this._overlays = value;
+        }
     },
 
     /**
@@ -420,6 +428,9 @@ exports.Map = Component.specialize(/** @lends Map# */ {
             }
             if (newBounds) {
                 this.bounds = newBounds;
+            }
+            if (this._engine) {
+                this._engine.bounds = newBounds;
             }
         }
     },

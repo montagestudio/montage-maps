@@ -2,8 +2,8 @@ var Montage = require("montage/core/core").Montage;
 
 /**
  *
- * A layer represents a collection of geographic data.  Each layer provides a reference to its
- * data set and the instructions for how to display the information.
+ * A layer represents a collection of geographic data.  Each layer provides a reference to
+ * its data set and the instructions for how to display the information.
  *
  * @class
  * @extends external:Montage
