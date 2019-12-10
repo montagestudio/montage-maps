@@ -287,17 +287,20 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     },
 
     _eraseFeature: {
-        value: function (feature) {
+        value: function (feature, willRedraw) {
             var self = this;
             this._symbols.forEach(function (featureSymbolMap) {
                 var symbol = featureSymbolMap.get(feature);
-                self._removeSymbol(symbol);
-                featureSymbolMap.delete(feature);
+                if (symbol) {
+                    console.log("Removing symbol (", symbol, ") for feature (", feature, ")");
+                    self._removeSymbol(symbol);
+                    featureSymbolMap.delete(feature);
+                }
             });
             if (this._features.has(feature)) {
                 this._features.delete(feature);
             }
-            if (this._processedCoordinates.has(feature)) {
+            if (this._processedCoordinates.has(feature) && !willRedraw) {
                 this._processedCoordinates.delete(feature);
             }
         }
@@ -758,7 +761,8 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                 } else if (action === DRAW_QUEUE_COMMANDS["ERASE"]) {
                     this._eraseFeature(feature);
                 } else if (action === DRAW_QUEUE_COMMANDS["REDRAW"]) {
-                    this._eraseFeature(feature);
+                    this._eraseFeature(feature, true);
+                    this._drawFeature(feature);
                 }
             }
             this._featureQueue.clear();
@@ -955,6 +959,8 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         value: function (firstTime) {
             if (firstTime) {
                 this._initialize();
+            } else if (this._map) {
+                this._map.invalidateSize();
             }
         }
     },

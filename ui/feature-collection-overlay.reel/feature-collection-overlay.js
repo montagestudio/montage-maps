@@ -58,6 +58,15 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
         value: MapPane.None
     },
 
+    _featureGeometryMap: {
+        get: function () {
+            if (!this.__featureGeometryMap) {
+                this.__featureGeometryMap = new Map();
+            }
+            return this.__featureGeometryMap;
+        }
+    },
+
     /**
      * @type {boolean}
      */
@@ -162,17 +171,17 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
 
     _handleFeatureGeometryChange: {
         value: function (value, key, object) {
-            if (key === "geometry") {
-                this._redrawFeature(object);
-            }
-            // var oldGeometry;
             // if (key === "geometry") {
-            //     oldGeometry = this._featureGeometryMap.get(object);
-            //     if (!oldGeometry || !oldGeometry.equals(value)) {
-            //         this._redrawFeature(object);
-            //     }
-            //     this._featureGeometryMap.set(object, value);
+            //     this._redrawFeature(object);
             // }
+            var oldGeometry;
+            if (key === "geometry") {
+                oldGeometry = this._featureGeometryMap.get(object);
+                if (!oldGeometry || !oldGeometry.equals(value)) {
+                    this._redrawFeature(object);
+                }
+                this._featureGeometryMap.set(object, value);
+            }
         }
     },
 
@@ -343,8 +352,10 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
 
     _drawFeatures: {
         value: function (features) {
-            var map = this.map;
+            var geometryMap = this._featureGeometryMap,
+                map = this.map;
             features.forEach(function (feature) {
+                geometryMap.set(feature, feature.geometry);
                 map.drawFeature(feature);
             });
         }
@@ -359,9 +370,14 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
      */
     _removeFeatures: {
         value: function (features) {
-            var map = this.map, i, n;
+            var geometryMap = this._featureGeometryMap,
+                map = this.map, feature, i, n;
             for (i = 0, n = features.length; i < n; i += 1) {
-                map.eraseFeature(features[i]);
+                feature = features[i];
+                if (geometryMap.has(feature)) {
+                    geometryMap.delete(feature);
+                }
+                map.eraseFeature(feature);
             }
         }
     },
@@ -529,6 +545,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             var feature, i, n;
             for (i = 0, n = features.length; i < n; i += 1) {
                 feature = features[i];
+                this._featureGeometryMap.set(feature, feature.geometry);
                 if (this._isFeatureClusterable(feature)) {
                     this._addFeatureToClusterManager(features[i]);
                 } else {
