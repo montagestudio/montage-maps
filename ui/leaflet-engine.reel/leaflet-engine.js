@@ -13,7 +13,6 @@ var Component = require("montage/ui/component").Component,
     Point2D = require("montage-geo/logic/model/point-2d").Point2D,
     Polygon = require("montage-geo/logic/model/polygon").Polygon,
     Position = require("montage-geo/logic/model/position").Position,
-    Promise = require("montage/core/promise").Promise,
     Set = require("montage/collections/set"),
     Size = require("montage-geo/logic/model/size").Size,
     DEFAULT_ZOOM = 4;
@@ -86,15 +85,17 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             return this._center;
         },
         set: function (value) {
-            var isPoint = value instanceof Point,
-                position;
+            var isPoint = value instanceof Position;
             if (isPoint && this._map) {
-                position = value.coordinates;
-                this._setCenter(position.longitude, position.latitude);
+                this._setCenter(value.longitude, value.latitude);
             } else if (isPoint) {
                 this._center = value;
             }
         }
+    },
+
+    map: {
+        value: undefined
     },
 
     /**
@@ -108,6 +109,9 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         value: undefined
     },
 
+    /**
+     * @type {}
+     */
     mode: {
         value: undefined
     },
@@ -127,6 +131,14 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             }
             return this._pixelOrigin;
         }
+    },
+
+    /**
+     * The pixel dimensions of the map.
+     * @type {Size}
+     */
+    size: {
+        value: undefined
     },
 
     /**
@@ -177,6 +189,13 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     /**************************************************************************
      * Coordinate Projection
      */
+
+    getOriginForZoom: {
+        value: function (zoom) {
+            var map = this._map;
+            return map.project(map.unproject(map.getPixelOrigin()), zoom).round();
+        }
+    },
 
     /**
      * Return's the pixel location of the provided position relative to the
@@ -349,60 +368,43 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     /**
      * Adds an overlay to the map to the specified pane.
      * @param {Component} - The overlay to add.
-     * @param {MapPane} -   The pane that the component should be added to.
-     * @returns {Promise} - A promise that will be fulfilled when the overlay
-     *                      is embedded into the map.
      */
     addOverlay: {
         value: function (component) {
-            var overlays = this._overlays.all,
-                self;
+            var overlays = this._overlays;
 
             if (overlays.has(component)) {
                 return;
             }
 
-            self = this;
-            overlays.add(component);
-            return new Promise(function (resolve, reject) {
-                self._queuedOverlays.push({
-                    overlay: component,
-                    action: "add",
-                    resolve: resolve,
-                    reject: reject
-                });
-                self.needsDraw = true;
+            overlays.push(component);
+            this._queuedOverlays.push({
+                overlay: component,
+                action: "add"
             });
+            this.needsDraw = true;
         }
     },
 
     /**
      * Adds an overlay to the map to the specified pane.
      * @param {Component} - The overlay to add.
-     * @param {MapPane} -   The pane that the component should be added to.
-     * @returns {Promise} - A promise that will be fulfilled when the overlay
-     *                      is embedded into the map.
      */
     removeOverlay: {
         value: function (component) {
-            var overlays = this._overlays.all,
-                self;
+            var overlays = this._overlays,
+                index = overlays.indexOf(component);
 
-            if (!overlays.has(component)) {
+            if (index === -1) {
                 return;
             }
 
-            self = this;
-            overlays.delete(component);
-            return new Promise(function (resolve, reject) {
-                self._queuedOverlays.push({
-                    overlay: component,
-                    action: "remove",
-                    resolve: resolve,
-                    reject: reject
-                });
-                self.needsDraw = true;
+            overlays.splice(index, 1);
+            this._queuedOverlays.push({
+                overlay: component,
+                action: "remove"
             });
+            this.needsDraw = true;
         }
     },
 
@@ -449,48 +451,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
     _overlays: {
         get: function () {
             if (!this.__overlays) {
-                this.__overlays = Object.create({}, {
-                    all: {
-                        get: function () {
-                            if (!this._all) {
-                                this._all = new Set();
-                            }
-                            return this._all;
-                        }
-                    },
-                    raster: {
-                        get: function () {
-                            if (!this._raster) {
-                                this._raster = new Set();
-                            }
-                            return this._raster;
-                        }
-                    },
-                    drawing: {
-                        get: function () {
-                            if (!this._drawing) {
-                                this._drawing = new Set();
-                            }
-                            return this._drawing;
-                        }
-                    },
-                    overlay: {
-                        get: function () {
-                            if (!this._overlay) {
-                                this._overlay = new Set();
-                            }
-                            return this._overlay;
-                        }
-                    },
-                    popUp: {
-                        get: function () {
-                            if (!this._popUp) {
-                                this._popUp = new Set();
-                            }
-                            return this._popUp;
-                        }
-                    },
-                });
+                this.__overlays = [];
             }
             return this.__overlays;
         }
@@ -512,57 +473,29 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
     _addQueueItemToMap: {
         value: function (queuedItem) {
-            var overlays = this._overlays,
-                component = queuedItem.overlay,
+            var component = queuedItem.overlay,
                 pane = component.pane || MapPane.Overlay,
                 container = this.elementForPane(pane),
                 element = component.element;
             if (element) {
                 container.appendChild(component.element);
             }
-            if (pane === MapPane.Raster || pane == MapPane.Overlay) {
-                this._resizeOverlay(component);
-            }
-            switch (pane) {
-                case MapPane.Raster:
-                    overlays.raster.add(component);
-                    break;
-                case MapPane.Drawing:
-                    overlays.drawing.add(component);
-                    break;
-                case MapPane.Overlay:
-                    overlays.overlay.add(component);
-                    break;
-                case MapPane.PopUp:
-                    overlays.popUp.add(component);
-                    break;
-            }
-            queuedItem.resolve();
+            component.didAdd(this);
+
+            // if (pane === MapPane.Raster || pane == MapPane.Overlay) {
+            //     this._resizeOverlay(component);
+            // }
+
         }
     },
 
     _removeQueueItemFromMap: {
         value: function (queuedItem) {
-            var overlays = this._overlays,
-                component = queuedItem.overlay,
+            var component = queuedItem.overlay,
                 pane = component.pane || MapPane.Overlay,
-                container = this.elementForPane(queuedItem.pane);
+                container = this.elementForPane(pane);
             container.removeChild(component.element);
-            switch (pane) {
-                case MapPane.Raster:
-                    overlays.raster.delete(component);
-                    break;
-                case MapPane.Drawing:
-                    overlays.drawing.delete(component);
-                    break;
-                case MapPane.Overlay:
-                    overlays.overlay.delete(component);
-                    break;
-                case MapPane.PopUp:
-                    overlays.popUp.delete(component);
-                    break;
-            }
-            queuedItem.resolve();
+            component.didRemove();
         }
     },
 
@@ -742,7 +675,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             if (this._map) {
                 size = this.size;
                 mapDimensions = this._map.getSize();
-                mapSize = Size.withHeightAndWidth(mapDimensions.x, mapDimensions.y);
+                mapSize = Size.withHeightAndWidth(mapDimensions.y, mapDimensions.x);
                 if (!size || !size.equals(mapSize)) {
                     this.size = mapSize;
                 }
@@ -976,10 +909,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
      */
     _initialize: {
         value: function () {
-            // this._initializeCenter();
             this._initializeMap();
-            this._initializeEvents();
-            this._initializeBaseMap();
         }
     },
 
@@ -993,7 +923,7 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
         value: function () {
             var width = this.element.offsetWidth,
                 height = this.element.offsetHeight,
-                position = this.center.coordinates,
+                position = this.center,
                 zoom = isNaN(this.zoom) ? DEFAULT_ZOOM : this.zoom,
                 minZoom = this._minZoomForDimensions(width, height),
                 center = [position.latitude, position.longitude],
@@ -1004,9 +934,17 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
                     zoomControl: false
                 });
             this._map = map;
-            map.addEventListener("load", this._updateCenterAndBounds.bind(this));
+            map.whenReady(this._completeInitialization.bind(this));
             map.setView(center, (minZoom > zoom ? minZoom : zoom));
             this._updateWorlds();
+        }
+    },
+
+    _completeInitialization: {
+        value: function () {
+            this._initializeEvents();
+            this._initializeBaseMap();
+            this.needsDraw = true;
         }
     },
 
@@ -1031,24 +969,22 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
      */
     _initializeEvents: {
         value: function () {
-            this._map.addEventListener("viewreset", this._handleViewReset.bind(this));
-            this._map.addEventListener("moveend", this._updateCenterAndBounds.bind(this));
             this._map.addEventListener("move", this._handleMapMove.bind(this));
+            this._map.addEventListener("moveend", this._handleMapDidMove.bind(this));
             this._map.addEventListener("resize", this._handleResize.bind(this));
-            // this._map.addEventListener("zoomstart", this._handleZoomStart.bind(this));
-            this._map.addEventListener("zoom", this._handleZoom.bind(this));
-            this._map.addEventListener("zoomend", this._handleZoomEnd.bind(this));
+            this._map.addEventListener("viewreset", this._handleViewReset.bind(this));
             this._map.addEventListener("zoomanim", this._handleZoomAnimation.bind(this));
+            this._map.addEventListener("zoom", this._handleZoom.bind(this));
+            this._map.addEventListener("zoomstart", this._handleZoomStart.bind(this));
+            this._map.addEventListener("zoomend", this._handleZoomEnd.bind(this));
         }
     },
 
-    _updateCenterAndBounds: {
+    _handleMapDidMove: {
         value: function () {
             var mapBounds = this._map.getBounds(),
-                mapCenter = this._map.getCenter();
-
-            // console.warn("Map bounds west (", mapBounds.getWest(), ") east (", mapBounds.getEast(), ")");
-            // console.warn("Wrapped map bounds west (", wrappedBounds.getWest(), ") east (", wrappedBounds.getEast(), ")");
+                mapCenter = this._map.getCenter(),
+                center = Position.withCoordinates([mapCenter.lng, mapCenter.lat]);
 
             this.dispatchBeforeOwnPropertyChange("bounds", this.bounds);
             this._bounds = BoundingBox.withCoordinates(
@@ -1058,11 +994,14 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
             // this._logBoundingBox(this._bounds);
             this.dispatchOwnPropertyChange("bounds", this.bounds);
             this.dispatchBeforeOwnPropertyChange("center", this.center);
-            this._center = Point.withCoordinates([mapCenter.lng, mapCenter.lat]);
+            this._center = center;
             this.dispatchOwnPropertyChange("center", this.center);
             if (this.maxBounds) {
                 this._validateBounds();
             }
+            this._overlays.forEach(function (overlay) {
+                overlay.didMove(center);
+            });
         }
     },
 
@@ -1078,23 +1017,27 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
     _handleMapMove: {
         value: function () {
+            // var center = this._map.getCenter(),
+            //     newPosition = Position.withCoordinates([center.lng, center.lat]);
             this._updateWorlds();
-            this._positionOverlays();
-            this.dispatchEventNamed("didMove", true, false, {center: this._map.getCenter()});
+            // this._overlays.forEach(function (overlay) {
+            //     overlay.move(newPosition);
+            // });
+            // this.dispatchEventNamed("didMove", true, false, {center: this._map.getCenter()});
         }
     },
 
-    _positionOverlays: {
-        value: function () {
-            var overlays = this._overlays,
-                self = this;
-            this._positionableOverlays.forEach(function (overlayId) {
-                overlays[overlayId].forEach(function (component) {
-                    self._positionOverlay(component);
-                });
-            });
-        }
-    },
+    // _positionOverlays: {
+    //     value: function () {
+    //         var overlays = this._overlays,
+    //             self = this;
+    //         this._positionableOverlays.forEach(function (overlayId) {
+    //             overlays[overlayId].forEach(function (component) {
+    //                 self._positionOverlay(component);
+    //             });
+    //         });
+    //     }
+    // },
 
     _positionOverlay: {
         value: function (component) {
@@ -1170,39 +1113,46 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
     _handleResize: {
         value: function () {
+            var mapSize = this._map.getSize(),
+                newSize = Size.withHeightAndWidth(mapSize.y, mapSize.x);
             this._updateMinZoomLevelIfNecessary();
-            this._resizeOverlays();
+            this._overlays.forEach(function (overlay) {
+                overlay.resize(newSize);
+            });
+            // this._resizeOverlays();
         }
     },
 
-    _resizeOverlays: {
-        value: function () {
-            var self = this,
-                overlays = this._overlays;
-            this._resizableOverlays.forEach(function (overlayId) {
-                overlays[overlayId].forEach(function (component) {
-                    self._resizeOverlay(component);
-                });
-            })
-        }
-    },
+    // _resizeOverlays: {
+    //     value: function () {
+    //         var self = this,
+    //             overlays = this._overlays;
+    //         this._resizableOverlays.forEach(function (overlayId) {
+    //             overlays[overlayId].forEach(function (component) {
+    //                 // TODO Make this a delegate method on the overlay component
+    //                 //  itself e.g. resize
+    //                 self._resizeOverlay(component);
+    //             });
+    //         })
+    //     }
+    // },
 
-    _resizeOverlay: {
-        value: function (component) {
-            var size = this._map.getSize(),
-                width = size.x,
-                height = size.y,
-                element = component.element,
-                isSVG = element.tagName.toUpperCase() === "SVG";
-            if (isSVG) {
-                element.setAttributeNS(null, "width", width);
-                element.setAttributeNS(null, "height", height);
-            } else {
-                element.setAttribute("width", width + "px");
-                element.setAttribute("height", height + "px");
-            }
-        }
-    },
+    // _resizeOverlay: {
+    //     value: function (component) {
+    //         var size = this._map.getSize(),
+    //             width = size.x,
+    //             height = size.y,
+    //             element = component.element,
+    //             isSVG = element.tagName.toUpperCase() === "SVG";
+    //         if (isSVG) {
+    //             element.setAttributeNS(null, "width", width);
+    //             element.setAttributeNS(null, "height", height);
+    //         } else {
+    //             element.setAttribute("width", width + "px");
+    //             element.setAttribute("height", height + "px");
+    //         }
+    //     }
+    // },
 
     _updateMinZoomLevelIfNecessary: {
         value: function () {
@@ -1220,44 +1170,81 @@ exports.LeafletEngine = Component.specialize(/** @lends LeafletEngine# */ {
 
     _handleViewReset: {
         value: function () {
-            var map = this._map,
-                pixelOrigin = map.getPixelOrigin(),
-                zoom = map.getZoom(),
-                point = map.unproject(pixelOrigin),
-                origin = map.project(point, zoom).round();
-
-            this.pixelOrigin = Point2D.withCoordinates(origin.x, origin.y);
-            this.needsDraw = true;
+            // var map = this._map,
+            //     center = map.getCenter(),
+            //     newPosition = Position.withCoordinates([center.lng, center.lat]),
+            //     // pixelOrigin = map.getPixelOrigin(),
+            //     zoom = map.getZoom();
+            //     // point = map.unproject(pixelOrigin),
+            //     // origin = map.project(point, zoom).round();
+            //
+            // this._overlays.forEach(function (overlay) {
+            //     overlay.reset(newPosition, zoom);
+            // });
+            // this.pixelOrigin = Point2D.withCoordinates(origin.x, origin.y);
+            // Not clear why this is needed.
+            // this.needsDraw = true;
+            this._resetOverlays();
         }
     },
 
     _handleZoom: {
         value: function (event) {
-            this.dispatchEventNamed("zoom", true, false, {zoom: this._map.getZoom()});
+            // this.dispatchEventNamed("zoom", true, false, {zoom: this._map.getZoom()});
+            // TODO: Implement some delegate method on each of the overlays e.g.
+            // TODO (cont'd): viewReset
+            this._resetOverlays();
+        }
+    },
+
+    _resetOverlays: {
+        value: function() {
+            var map = this._map,
+                center = map.getCenter(),
+                newPosition = Position.withCoordinates([center.lng, center.lat]),
+                zoom = map.getZoom();
+            this._overlays.forEach(function (overlay) {
+                overlay.reset(newPosition, zoom);
+            });
         }
     },
 
     _handleZoomAnimation: {
-        value: function (event) {
-            var center = event.center;
-            this.dispatchBeforeOwnPropertyChange("zoom", this.zoom);
-            this._zoom = event.zoom;
-            this.dispatchOwnPropertyChange("zoom", this.zoom);
-            this.dispatchBeforeOwnPropertyChange("center", this.center);
-            this._center = Point.withCoordinates([center.lat, center.lng]);
-            this.dispatchOwnPropertyChange("center", this.center);
+        value: function () {
+            // var center = event.center;
+            // this.dispatchBeforeOwnPropertyChange("zoom", this.zoom);
+            // this._zoom = event.zoom;
+            // this.dispatchOwnPropertyChange("zoom", this.zoom);
+            // this.dispatchBeforeOwnPropertyChange("center", this.center);
+            // this._center = Point.withCoordinates([center.lat, center.lng]);
+            // this.dispatchOwnPropertyChange("center", this.center);
+            // TODO: Implement some delegate method on each of the overlays e.g.
+            // TODO (cont'd): viewReset
+            this._resetOverlays();
         }
     },
 
     _handleZoomEnd: {
         value: function (event) {
-            this.dispatchEventNamed("didZoom", true, false, {zoom: this._map.getZoom()});
+            this._overlays.forEach(function (overlay) {
+                overlay.didReset();
+            });
+
+            // this.dispatchEventNamed("didZoom", true, false, {zoom: this._map.getZoom()});
+            // TODO: Implement some delegate method on each of the overlays e.g.
+            // TODO (cont'd): viewDidChange
         }
     },
 
     _handleZoomStart: {
         value: function (event) {
-            console.log("Handle zoom start (", event, ") current zoom (", this._map.getZoom(), ")");
+            this._overlays.forEach(function (overlay) {
+                overlay.willReset();
+            });
+
+            // console.log("Handle zoom start (", event, ") current zoom (", this._map.getZoom(), ")");
+            // TODO: Implement some delegate method on each of the overlays e.g.
+            // TODO (cont'd): viewWillReset
         }
     },
 

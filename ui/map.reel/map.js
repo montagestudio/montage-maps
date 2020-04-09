@@ -2,6 +2,7 @@ var Component = require("montage/ui/component").Component,
     BoundingBox = require("montage-geo/logic/model/bounding-box").BoundingBox,
     LeafletEngine = require("ui/leaflet-engine.reel").LeafletEngine,
     Point = require("montage-geo/logic/model/point").Point,
+    Position = require("montage-geo/logic/model/position").Position,
     Promise = require("montage/core/promise").Promise;
 
 var MAX_BOUNDS = BoundingBox.withCoordinates(
@@ -37,7 +38,7 @@ exports.Map = Component.specialize(/** @lends Map# */ {
      * The current center of the map.  Setting this value will update the map's
      * position.
      *
-     * @type {Point}
+     * @type {Position}
      */
     center: {
         get: function () {
@@ -45,9 +46,9 @@ exports.Map = Component.specialize(/** @lends Map# */ {
         },
         set: function (value) {
             if (Array.isArray(value) && value.length > 1) {
-                value = Point.withCoordinates(value);
+                value = Position.withCoordinates(value);
             }
-            if (value && value instanceof Point) {
+            if (value && value instanceof Position) {
                 this._center = value;
             }
         }
@@ -147,12 +148,10 @@ exports.Map = Component.specialize(/** @lends Map# */ {
         value: function () {
             var self = this,
                 overlays = this.overlays || [];
-            return Promise.all(overlays.map(function (overlay) {
-                return self.addOverlay(overlay).then(function () {
-                    overlay.map = self;
-                    return null;
-                });
-            }))
+            overlays.forEach(function (overlay) {
+                this.addOverlay(overlay);
+                overlay.map = this;
+            }, this);
         }
     },
 
@@ -197,10 +196,6 @@ exports.Map = Component.specialize(/** @lends Map# */ {
 
     _removeEngineEventListeners: {
         value: function (engine) {
-            engine.removeEventListener("didMove", this);
-            engine.removeEventListener("zoom", this);
-            engine.removeEventListener("didZoom", this);
-            engine.removeEventListener("willZoom", this);
             engine.removeEventListener("featureMouseout", this);
             engine.removeEventListener("featureMouseover", this);
             engine.removeEventListener("featureSelection", this);
@@ -214,9 +209,6 @@ exports.Map = Component.specialize(/** @lends Map# */ {
 
     _addEngineEventListeners: {
         value: function (engine) {
-            engine.addEventListener("didMove", this);
-            engine.addEventListener("zoom", this);
-            engine.addEventListener("willZoom", this);
             engine.addEventListener("featureMouseout", this);
             engine.addEventListener("featureMouseover", this);
             engine.addEventListener("featureSelection", this);
@@ -229,53 +221,57 @@ exports.Map = Component.specialize(/** @lends Map# */ {
 
     handleRangeChange: {
         value: function (plus, minus) {
-            var engine, self;
-            if (engine = this._engine) {
-                self = this;
+            var engine = this._engine;
+            if (engine) {
                 plus.forEach(function (overlay) {
-                    engine.addOverlay(overlay).then(function () {
-                        overlay.map = self;
-                        return null;
-                    });
-                });
+                    engine.addOverlay(overlay);
+                    overlay.map = this;
+                }, this);
                 minus.forEach(function (overlay) {
-                    engine.removeOverlay(overlay).then(function () {
-                        overlay.map = null;
-                        return null;
-                    });
-                });
+                    engine.removeOverlay(overlay);
+                    overlay.map = this;
+                }, this);
             }
         }
     },
 
-    handleDidMove: {
-        value: function (event) {
-            event.stopPropagation();
-            this.dispatchEventNamed("didMove", true, true, event.detail);
-        }
-    },
+    /**
+     * Remove events in preference to delegate methods.  These functions should
+     * be called synchronously to make the changes as smooth as possible.
+     */
 
-    handleDidZoom: {
-        value: function (event) {
-            event.stopPropagation();
-            this.dispatchEventNamed("didZoom", true, true, event.detail);
-        }
-    },
+    // handleDidMove: {
+    //     value: function (event) {
+    //         event.stopPropagation();
+    //         this.dispatchEventNamed("didMove", true, true, event.detail);
+    //     }
+    // },
+    //
+    // handleDidZoom: {
+    //     value: function (event) {
+    //         event.stopPropagation();
+    //         this.dispatchEventNamed("didZoom", true, true, event.detail);
+    //     }
+    // },
+    //
+    // handleZoom: {
+    //     value: function (event) {
+    //         event.stopPropagation();
+    //         this.dispatchEventNamed("zoom", true, true, event.detail);
+    //     }
+    // },
+    //
+    // handleWillZoom: {
+    //     value: function (event) {
+    //         event.stopPropagation();
+    //         this.dispatchEventNamed("willZoom", true, true, event.detail);
+    //     }
+    // },
 
-    handleZoom: {
-        value: function (event) {
-            event.stopPropagation();
-            this.dispatchEventNamed("zoom", true, true, event.detail);
-        }
-    },
-
-    handleWillZoom: {
-        value: function (event) {
-            event.stopPropagation();
-            this.dispatchEventNamed("willZoom", true, true, event.detail);
-        }
-    },
-
+    /**
+     * These events may remain as is as components other than overlays may
+     * need to listen to these.
+     */
     handleFeatureMouseout: {
         value: function (event) {
             event.stopPropagation();
@@ -311,6 +307,12 @@ exports.Map = Component.specialize(/** @lends Map# */ {
     addOverlay: {
         value: function (overlay) {
             this.overlays.push(overlay);
+        }
+    },
+
+    getOriginForZoom: {
+        value: function (zoom) {
+            this._engine && this._engine.getOriginForZoom(zoom);
         }
     },
 
@@ -445,10 +447,10 @@ exports.Map = Component.specialize(/** @lends Map# */ {
     setCenter: {
         value: function () {
             var newCenter;
-            if (arguments.length === 1 && arguments[0] instanceof Point) {
+            if (arguments.length === 1 && arguments[0] instanceof Position) {
                 newCenter = arguments[0];
             } else if (arguments.length === 2) {
-                newCenter = Point.withCoordinates([arguments[0], arguments[1]]);
+                newCenter = Position.withCoordinates([arguments[0], arguments[1]]);
             }
             if (newCenter) {
                 this.center = newCenter;

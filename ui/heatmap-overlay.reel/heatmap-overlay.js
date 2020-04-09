@@ -1,4 +1,4 @@
-var Component = require("montage/ui/component").Component,
+var Overlay = require("ui/overlay").Overlay,
     MapPane = require("logic/model/map-pane").MapPane,
     MultiLineString = require("montage-geo/logic/model/multi-line-string").MultiLineString,
     MultiPoint = require("montage-geo/logic/model/multi-point").MultiPoint,
@@ -10,7 +10,7 @@ var Component = require("montage/ui/component").Component,
  * @class HeatmapOverlay
  * @extends Component
  */
-exports.HeatmapOverlay = Component.specialize(/** @lends HeatmapOverlay.prototype */{
+exports.HeatmapOverlay = Overlay.specialize(/** @lends HeatmapOverlay.prototype */{
 
     constructor: {
         value: function HeatmapOverlay() {
@@ -18,7 +18,7 @@ exports.HeatmapOverlay = Component.specialize(/** @lends HeatmapOverlay.prototyp
                 redraw = function () {
                     self.needsDraw = true;
                 };
-            this.addOwnPropertyChangeListener("_isEnabled", redraw);
+            Overlay.call(this);
             this.addRangeAtPathChangeListener("collection.features", redraw);
         }
     },
@@ -27,23 +27,60 @@ exports.HeatmapOverlay = Component.specialize(/** @lends HeatmapOverlay.prototyp
      * Properties
      */
 
-    // DEFAULT_BLUR: {
-    //     value: 20
-    // },
-    //
-    // DEFAULT_RADIUS: {
-    //     value: 20
-    // },
+    /**
+     * The features to draw as a heatmap.
+     * @type {FeatureCollection}
+     */
+    collection: {
+        value: undefined
+    },
 
-    // DEFAULT_GRADIENT: {
-    //     value: {
-    //         0.4: 'blue',
-    //         0.6: 'cyan',
-    //         0.7: 'lime',
-    //         0.8: 'yellow',
-    //         1.0: 'red'
-    //     }
-    // },
+    /**
+     * @override
+     */
+    hasTemplate: {
+        value: true
+    },
+
+    /**
+     * The map that this overlays features are symbolized on.
+     * @type {Map}
+     */
+    map: {
+        get: function () {
+            return this._map;
+        },
+        set: function (value) {
+            this._map = value;
+            this.needsDraw = true;
+        }
+    },
+
+    maxZoom: {
+        writable: false,
+        value: 30
+    },
+
+    pane: {
+        value: MapPane.Overlay
+    },
+
+    _levels: {
+        get: function () {
+            if (!this.__levels) {
+                this.__levels = {};
+            }
+            return this.__levels;
+        }
+    },
+
+    _zoom: {
+        value: 0
+    },
+
+    /***********************************************************************
+     * Heatmap Options
+     */
 
     /**
      * @type {number}
@@ -85,108 +122,90 @@ exports.HeatmapOverlay = Component.specialize(/** @lends HeatmapOverlay.prototyp
         }
     },
 
-    /**
-     * The features to draw as a heatmap.
-     * @type {FeatureCollection}
+    /***********************************************************************
+     * Overlay Delegate Methods
      */
-    collection: {
-        value: undefined
+
+    didReset: {
+        value: function () {
+            if (this.isClustering) {
+                this._featureQueue.clear();
+                this._redrawAll();
+            }
+        }
     },
 
-    /**
-     * The map that this overlays features are symbolized on.
-     * @type {Map}
+    /***********************************************************************
+     * Event Handling
      */
-    map: {
-        get: function () {
-            return this._map;
-        },
-        set: function (value) {
-            if (this._map) {
-                this._map.removeEventListener("didMove", this);
-                this._map.removeEventListener("zoom", this);
-            }
-            this._map = value;
-            if (this._map) {
-                this._map.addEventListener("didMove", this);
-                this._map.addEventListener("zoom", this);
-            }
+
+    /**
+     * @override
+     */
+    handleIsEnableDidChange: {
+        value: function () {
             this.needsDraw = true;
         }
     },
 
-    pane: {
-        value: MapPane.Overlay
-    },
-
-    /**
-     * @type {Canvas}
-     */
-    _circle: {
-        get: function () {
-            if (!this.__circle) {
-                this.__circle = this._initializeCircle(this.radius, this.blur);
-            }
-            return this.__circle;
-        }
-    },
-
-    /**
-     * Flag indicating if the map is being resized.
-     * @type {boolean}
-     */
-    _isRegistered: {
-        value: false
-    },
-
-    /**
-     * The array of points to draw on the overlay.  Calculated from the
-     * feature's geometry.
-     * @type {Point2D[]}
-     */
-    _points: {
-        value: undefined
-    },
-
     /***********************************************************************
-     * Listeners
+     * Overlay Delegate Methods
      */
 
-    handleZoom: {
-        value: function (event) {
-            if (this._isEnabled && this.map) {
-                this._calculatePoints();
-                this._paint();
+    reset: {
+        value: function (center, zoom) {
+            // TODO: Consider something like min/max zooms.
+            // TODO: Cont'd could be in the map.
+            var zoomChanged = zoom !== this._zoom;
+            if (zoomChanged) {
+                this._zoom = zoom;
+                this._updateLevels();
             }
+            // if (this._isEnabled && this.map) {
+            //     this._calculatePoints();
+            //     this._paint();
+            // }
         }
     },
 
-    handleDidMove: {
-        value: function (event) {
-            if (this._isEnabled && this.map) {
-                this._calculatePoints();
-                this._paint();
-            }
-        }
-    },
-
-    _addMapListeners: {
+    didMove: {
         value: function () {
-            var map;
-            if (map = this.map) {
-                map.addEventListener("didMove", this);
-                map.addEventListener("didZoom", this);
+            if (this._isEnabled) {
+                this.needsDraw = true;
             }
         }
     },
 
-    _cancelMapListeners: {
+    _updateLevels: {
         value: function () {
-            var map;
-            if (map = this.map) {
-                map.removeEventListener("didMove", this);
-                map.removeEventListener("didZoom", this);
+            var currentZoom = this._zoom,
+                currentLevel = this._levels[currentZoom],
+                maxZoom = this.maxZoom,
+                element,
+                zoom;
+            for (zoom in this._levels) {
+                if (this._levels[zoom].element.children.length || current === zoom) {
+                    this._levels[zoom].style.zIndex = maxZoom - Math.abs(currentZoom - zoom);
+                    this._updateLevel(zoom);
+                }
             }
+            if (!currentLevel) {
+                element = document.createElement("div");
+                element.classList.add("montageMaps-HeatmapOverlayLevel");
+                element.style.zIndex = maxZoom;
+                currentLevel = {
+                    element: element,
+                    origin: this.map.getOriginForZoom(currentZoom),
+                    zoom: currentZoom
+                };
+
+            }
+        }
+    },
+
+    _updateLevel: {
+        value: function () {
+            return void 0;
         }
     },
 
@@ -196,7 +215,8 @@ exports.HeatmapOverlay = Component.specialize(/** @lends HeatmapOverlay.prototyp
 
     draw: {
         value: function () {
-            if (this._isEnabled && this.map) {
+            if (this._isEnabled && this._points) {
+                this._position();
                 this._paint();
             } else {
                 this._clear();
@@ -204,23 +224,27 @@ exports.HeatmapOverlay = Component.specialize(/** @lends HeatmapOverlay.prototyp
         }
     },
 
-    enterDocument: {
-        value: function () {
-            this._isEnabled = true;
-        }
-    },
-
-    exitDocument: {
-        value: function () {
-            this._isEnabled = false;
-        }
-    },
-
     willDraw: {
         value: function () {
-            if (this._isEnabled && this.map) {
+            if (this._isEnabled) {
                 this._calculatePoints();
             }
+        }
+    },
+
+    _position: {
+        value: function () {
+            var map = this.map,
+                size = map.size,
+                center = map.center,
+                pixelCenter = map.positionToPoint(center),
+                offset = {
+                    left: pixelCenter.x - size.width / 2,
+                    top: pixelCenter.y - size.height / 2
+                };
+            this.element.style.transform = "translate3d(" + offset.left + "px, " + offset.top + "px, 0)";
+            this.element.setAttribute("width", size.width);
+            this.element.setAttribute("height", size.height);
         }
     },
 
@@ -261,6 +285,18 @@ exports.HeatmapOverlay = Component.specialize(/** @lends HeatmapOverlay.prototyp
     /**************************************************************************
      * Drawing the overlay
      */
+
+    /**
+     * @type {Canvas}
+     */
+    _circle: {
+        get: function () {
+            if (!this.__circle) {
+                this.__circle = this._initializeCircle(this.radius, this.blur);
+            }
+            return this.__circle;
+        }
+    },
 
     _clear: {
         value: function () {
@@ -349,6 +385,15 @@ exports.HeatmapOverlay = Component.specialize(/** @lends HeatmapOverlay.prototyp
             this._colorize(colored.data, this.gradient);
             context.putImageData(colored, 0, 0);
         }
+    },
+
+    /**
+     * The array of points to draw on the overlay.  Calculated from the
+     * feature's geometry.
+     * @type {Point2D[]}
+     */
+    _points: {
+        value: undefined
     }
 
 });

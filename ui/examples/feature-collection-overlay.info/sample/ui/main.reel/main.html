@@ -20,6 +20,7 @@
             "properties": {
                 "element": {"#": "map"},
                 "center": [-156.6825, 20.8783],
+                "overlays": [{"@": "featureCollectionOverlay"}],
                 "zoom": 5
             }
         },
@@ -29,8 +30,8 @@
         "featureCollectionOverlay": {
             "prototype": "montage-maps/ui/feature-collection-overlay.reel",
             "values": {
-                "map": {"@": "map"},
-                "collection": {"@": "featureCollection"}
+                "collection": {"@": "featureCollection"},
+                "map": {"@": "map"}
             }
         }
     }

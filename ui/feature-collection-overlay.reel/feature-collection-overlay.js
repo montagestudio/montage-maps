@@ -1,4 +1,4 @@
-var Component = require("montage/ui/component").Component,
+var Overlay = require("ui/overlay").Overlay,
     FeatureCluster = require("logic/model/feature-cluster").FeatureCluster,
     ClusterOrganizer = require("logic/model/cluster-organizer").ClusterOrganizer,
     Map = require("montage/collections/map"),
@@ -12,13 +12,7 @@ var Component = require("montage/ui/component").Component,
  * @class FeatureCollectionOverlay
  * @extends Component
  */
-exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollectionOverlay# */ {
-
-    constructor: {
-        value: function FeatureCollectionOverlay() {
-            this.addOwnPropertyChangeListener("_isEnabled", this._handleIsEnableDidChange.bind(this));
-        }
-    },
+exports.FeatureCollectionOverlay = Overlay.specialize(/** @lends FeatureCollectionOverlay# */ {
 
     /***********************************************************************
      * Properties
@@ -45,19 +39,31 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
         }
     },
 
+    // TODO: Maybe make FeatureCollectionOverlay a template-less component.
+    hasTemplate: {
+        value: true
+    },
+
     /**
-     * The map that this overlays features are symbolized on.
+     * The map that this overlay's features are symbolized on.
      * @type {Map}
      */
     map: {
         value: undefined
     },
 
+    /**
+     * The pane this component should be positioned in.
+     * @type {MapPane}
+     */
     pane: {
         writable: false,
         value: MapPane.None
     },
 
+    /**
+     * @type {Map}
+     */
     _featureGeometryMap: {
         get: function () {
             if (!this.__featureGeometryMap) {
@@ -68,12 +74,9 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
     },
 
     /**
-     * @type {boolean}
+     * The current zoom level of the map.
+     * @type {number}
      */
-    _isEnabled: {
-        value: false
-    },
-
     _zoom: {
         value: 0
     },
@@ -115,8 +118,6 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
         value: function () {
             var map;
             if (map = this.map) {
-                map.addEventListener("didZoom", this);
-                map.addEventListener("willZoom", this);
                 map.addEventListener("featureMouseout", this);
                 map.addEventListener("featureMouseover", this);
                 map.addEventListener("featureSelection", this);
@@ -129,8 +130,6 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
         value: function () {
             var map;
             if (map = this.map) {
-                map.removeEventListener("didZoom", this);
-                map.removeEventListener("willZoom", this);
                 map.removeEventListener("featureMouseout", this);
                 map.removeEventListener("featureMouseover", this);
                 map.removeEventListener("featureSelection", this);
@@ -142,6 +141,21 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
     /***********************************************************************
      * Observing the collection changes
      */
+
+    /**
+     * @override
+     */
+    handleIsEnableDidChange: {
+        value: function (value) {
+            if (value) {
+                this._drawAll();
+                this._addMapListeners();
+            } else {
+                this._clearAll(true);
+                this._cancelMapListeners();
+            }
+        }
+    },
 
     /**
      * Range change listener for the collection's features.
@@ -171,9 +185,6 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
 
     _handleFeatureGeometryChange: {
         value: function (value, key, object) {
-            // if (key === "geometry") {
-            //     this._redrawFeature(object);
-            // }
             var oldGeometry;
             if (key === "geometry") {
                 oldGeometry = this._featureGeometryMap.get(object);
@@ -193,18 +204,6 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
         }
     },
 
-    _handleIsEnableDidChange: {
-        value: function (value) {
-            if (value) {
-                this._drawAll();
-                this._addMapListeners();
-            } else {
-                this._clearAll(true);
-                this._cancelMapListeners();
-            }
-        }
-    },
-
     _featuresRangeChangeListener: {
         value: undefined
     },
@@ -214,11 +213,14 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
     },
 
     /***********************************************************************
-     * Event handlers
+     * Overlay Delegate Methods
      */
 
-    handleDidZoom: {
-        value: function (event) {
+    /**
+     * @override
+     */
+    didReset: {
+        value: function () {
             if (this.isClustering) {
                 this._featureQueue.clear();
                 this._redrawAll();
@@ -226,11 +228,9 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
         }
     },
 
-    handleWillZoom: {
-        value: function (event) {
-
-        }
-    },
+    /***********************************************************************
+     * Event handlers
+     */
 
     handleFeatureMouseout: {
         value: function (event) {
@@ -320,16 +320,6 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             if (this.collection) {
                 this._removeFeatures(this.collection.features, clearImmediately);
             }
-
-            // var iterator = this._drawnFeatures.values(),
-            //     map = this.map,
-            //     feature;
-            // while (feature = iterator.next().value) {
-            //     map.eraseFeature(feature, clearImmediately);
-            // }
-            // if (this.isClustering) {
-            //     this._clusterManager.reset();
-            // }
         }
     },
 
@@ -347,6 +337,12 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
             } else {
                 this._drawFeatures(features);
             }
+        }
+    },
+
+    _drawAll: {
+        value: function () {
+            this._addFeatures(this.collection.features);
         }
     },
 
@@ -382,19 +378,6 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
         }
     },
 
-    // /**
-    //  * Sends a command to the map to erase the feature.
-    //  * @private
-    //  * @param {Feature}
-    //  * @method
-    //  */
-    // _eraseFeature: {
-    //     value: function (feature) {
-    //         this.map.eraseFeature(feature);
-    //         // this._drawnFeatures.delete(feature);
-    //     }
-    // },
-
     /**
      * Queues all drawn features to be redrawn on the map.
      * @private
@@ -403,8 +386,7 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
     _redrawAll: {
         value: function () {
             this._clearAll(true);
-            this._addFeatures(this.collection.features);
-            this.needsDraw = true;
+            this._drawAll();
         }
     },
 
@@ -418,56 +400,8 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
     _redrawFeature: {
         value: function (feature) {
             this.map.redrawFeature(feature);
-            // this._featureQueue.set(feature, DRAW_QUEUE_COMMANDS["REDRAW"]);
         }
     },
-
-    _drawAll: {
-        value: function () {
-            var features = this.collection && this.collection.features,
-                i, n;
-            for (i = 0, n = features && features.length || 0; i < n; i += 1) {
-                this._featureQueue.set(features[i], DRAW_QUEUE_COMMANDS["ADD"]);
-            }
-            if (this._featureQueue.size) {
-                this.needsDraw = true;
-            }
-        }
-    },
-
-    // /**
-    //  * Queues a single feature to be removed from the map during the next draw
-    //  * cycle.
-    //  * @private
-    //  * @param {Feature}
-    //  * @method
-    //  */
-    // _removeFeature: {
-    //     value: function (feature) {
-    //         if (this._featureGeometryMap.has(feature)) {
-    //             this._featureGeometryMap.delete(feature);
-    //         }
-    //         this._featureQueue.set(feature, DRAW_QUEUE_COMMANDS["REMOVE"]);
-    //     }
-    // },
-
-    // /**
-    //  * Sends a command to the map to draw the feature.
-    //  * @private
-    //  * @param {Feature}
-    //  * @method
-    //  */
-    // _drawFeature: {
-    //     value: function (feature) {
-    //         if (feature instanceof FeatureCluster) {
-    //             this.engine.drawCluster(feature);
-    //         } else {
-    //             this.engine.drawFeature(feature);
-    //         }
-    //         this._drawnFeatures.add(feature);
-    //     }
-    // },
-
 
     /***********************************************************************
      * Clustering
@@ -626,22 +560,6 @@ exports.FeatureCollectionOverlay = Component.specialize(/** @lends FeatureCollec
                 this.__mousedOverFeatures = new Set();
             }
             return this.__mousedOverFeatures;
-        }
-    },
-
-    /***********************************************************************
-     * Enabling & Disabling
-     */
-
-    enterDocument: {
-        value: function () {
-            this._isEnabled = true;
-        }
-    },
-
-    exitDocument: {
-        value: function () {
-            this._isEnabled = false;
         }
     },
 

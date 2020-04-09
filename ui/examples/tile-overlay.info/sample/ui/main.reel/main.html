@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>
+        Contour Action Menu Sample
+    </title>
+    <link rel="stylesheet" href="main.css">
+    <script type="text/montage-serialization">
+    {
+        "owner": {
+            "properties": {
+                "element": {"#": "main"},
+                "_map": {"@": "map"}
+            }
+        },
+        "tileOverlay": {
+            "prototype": "montage-maps/ui/tile-overlay.reel",
+            "values": {
+                "element": {"#": "tileOverlay"}
+            }
+        },
+        "map": {
+            "prototype": "montage-maps/ui/map.reel",
+            "values": {
+                "element": {"#": "map"},
+                "center": [121.477, 31.225],
+                "overlays": [{"@": "tileOverlay"}],
+                "zoom": 5
+            }
+        }
+    }
+    </script>
+</head>
+<body>
+    <div data-montage-id="main" class="Main">
+        <div data-montage-id="map"></div>
+        <div data-montage-id="tileOverlay"></div>
+    </div>
+</body>
+</html>
