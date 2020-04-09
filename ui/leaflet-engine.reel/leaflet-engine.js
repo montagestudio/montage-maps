@@ -1638,7 +1638,7 @@ var Symbolizer = Enumeration.specialize(/** @lends Symbolizer */ "id", {
                     if (offset !== 0) {
                         longitude += offset;
                     }
-                    return L.marker([coordinates[0], longitude], options);
+                    return L.marker([coordinate[0], longitude], options);
                 });
             }
         },
