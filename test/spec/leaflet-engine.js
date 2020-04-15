@@ -1,5 +1,6 @@
 var LeafletEngine = require("montage-maps/ui/leaflet-engine.reel").LeafletEngine,
     Feature = require("montage-geo/logic/model/feature").Feature,
+    GeometryCollection = require("montage-geo/logic/model/geometry-collection").GeometryCollection,
     LineString = require("montage-geo/logic/model/line-string").LineString,
     MultiLineString = require("montage-geo/logic/model/multi-line-string").MultiLineString,
     MultiPoint = require("montage-geo/logic/model/multi-point").MultiPoint,
@@ -200,4 +201,38 @@ describe("A Leaflet Engine", function () {
 
     });
 
+    it("can properly pre-process GeometryCollection geometries", function () {
+
+        var feature = Feature.withMembers(1, {}, GeometryCollection.withGeometries([
+                Point.withCoordinates([-156.6825, 20.8783]),
+                LineString.withCoordinates([
+                    [178.68, 45.51],
+                    [-178.43, 37.77],
+                    [178.2, 34.04]
+                ]),
+                MultiPoint.withCoordinates([
+                    [0, 0], [10, 0], [10, 10], [0, 10]
+                ]),
+            ])),
+            processed = engine._processCoordinates(feature.geometry);
+
+        expect(processed[0][0]).toBe(20.8783);
+        expect(processed[0][1]).toBe(-156.6825);
+
+        expect(processed[1][0][0]).toBe(45.51);
+        expect(processed[1][0][1]).toBe(178.68);
+        expect(processed[1][1][0]).toBe(37.77);
+        expect(processed[1][1][1]).toBe(181.57);
+        expect(processed[1][2][0]).toBe(34.04);
+        expect(processed[1][2][1]).toBe(178.2);
+
+        expect(processed[2][0][0]).toBe(0);
+        expect(processed[2][0][1]).toBe(0);
+        expect(processed[2][1][0]).toBe(0);
+        expect(processed[2][1][1]).toBe(10);
+        expect(processed[2][2][0]).toBe(10);
+        expect(processed[2][2][1]).toBe(10);
+        expect(processed[2][3][0]).toBe(10);
+        expect(processed[2][3][1]).toBe(0);
+    });
 });
